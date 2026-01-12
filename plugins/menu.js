@@ -1,31 +1,18 @@
 module.exports = {
     name: "menu",
-    description: "Automatically lists all available commands",
+    description: "Dynamic automatic menu list",
     async execute(sock, from, msg, args, commands) {
-        // This 'commands' Map is passed from index.js automatically
-        
-        let menuText = `*─── 『 NYONI-XMD MENU 』 ───*\n\n`;
-        menuText += `*Available Commands:* \n`;
+        let menuText = `*─── 『 NYONI-XMD 』 ───*\n\n`;
+        menuText += `*Total Features:* ${commands.size}\n\n`;
+        menuText += `*COMMAND LIST:*\n`;
 
-        // Loop through the commands Map to build the list automatically
+        // This loop automatically pulls every command name from your plugins folder
         commands.forEach((plugin, name) => {
-            menuText += `  ✧ .${name}\n`;
+            menuText += `✧ .${name}\n`;
         });
 
-        menuText += `\n*Total Commands:* ${commands.size}\n`;
-        menuText += `_Powered by Nyoni-XMD_`;
+        menuText += `\n_The menu updates automatically when you add new plugins._`;
 
-        await sock.sendMessage(from, { 
-            text: menuText,
-            contextInfo: {
-                externalAdReply: {
-                    title: "NYONI-XMD AUTOMATIC SYSTEM",
-                    body: "The bot is active",
-                    sourceUrl: "https://github.com/devnyoni/vcf",
-                    mediaType: 1,
-                    renderLargerThumbnail: false
-                }
-            }
-        }, { quoted: msg });
+        await sock.sendMessage(from, { text: menuText }, { quoted: msg });
     }
 };
