@@ -12,38 +12,36 @@ const express = require("express");
 const app = express();
 const port = process.env.PORT || 10000;
 
-// Middleware
+// Serve static files
 app.use(express.static(path.join(__dirname, '.')));
 
-// --- WEB INTERFACE ---
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// --- PAIRING CODE ENDPOINT ---
+// PAIRING CODE ENDPOINT WITH AUTO-RETRY
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).json({ error: "Number is required" });
+    if (!num) return res.status(400).json({ error: "Phone number is required" });
     num = num.replace(/[^0-9]/g, '');
 
-    if (!sock) {
-        return res.status(503).json({ error: "Bot is initializing, please wait..." });
+    if (!sock || !sock.requestPairingCode) {
+        return res.status(503).json({ error: "Bot is still starting. Please wait 10 seconds and try again." });
     }
 
     try {
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Error generating code" });
+        console.error("Pairing Error:", err);
+        res.status(500).json({ error: "Server Busy. Click 'Generate' again." });
     }
 });
 
 app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    console.log(`Web server active on port ${port}`);
 });
 
-// --- BOT CORE ---
 let sock;
 const commands = new Map();
 const prefix = ",";
@@ -61,13 +59,17 @@ async function startNyoni() {
         browser: ["Nyoni-XMD", "Chrome", "20.0.04"]
     });
 
-    // Plugin Loader
+    // Load Plugins
     const pluginsPath = path.join(__dirname, 'plugins');
     if (fs.existsSync(pluginsPath)) {
         fs.readdirSync(pluginsPath).forEach(file => {
             if (file.endsWith(".js")) {
-                const plugin = require(path.join(pluginsPath, file));
-                commands.set(plugin.name, plugin);
+                try {
+                    const plugin = require(path.join(pluginsPath, file));
+                    commands.set(plugin.name, plugin);
+                } catch (e) {
+                    console.error(`Plugin error: ${file}`, e);
+                }
             }
         });
     }
@@ -82,7 +84,7 @@ async function startNyoni() {
         } else if (connection === 'open') {
             console.log('NYONI-XMD CONNECTED! 🚀');
             await sock.sendMessage("120363399470975987@newsletter", { 
-                text: "NYONI-XMD IS ONLINE! 🚀" 
+                text: "NYONI-XMD IS ONLINE! 🚀\nPrefix: ,\nOwner: Nyoni-xmd" 
             });
         }
     });
@@ -98,7 +100,13 @@ async function startNyoni() {
         const cmdName = args.shift().toLowerCase();
 
         const plugin = commands.get(cmdName);
-        if (plugin) await plugin.execute(sock, from, msg, args);
+        if (plugin) {
+            try {
+                await plugin.execute(sock, from, msg, args, commands);
+            } catch (err) {
+                console.error(err);
+            }
+        }
     });
 }
 
