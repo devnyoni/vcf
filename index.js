@@ -2,7 +2,6 @@ const {
     default: makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
-    fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
@@ -14,61 +13,53 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 let sock;
 
-// SERVER LOGIC (HTML & Pairing)
+// 1. WEB SERVER
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).json({ error: "Weka namba!" });
+    if (!num) return res.status(400).json({ error: "Weka namba" });
     
-    // Hapa bot inatengeneza pairing code
+    // Safisha namba (Ondoa +, nafasi, n.k)
+    num = num.replace(/[^0-9]/g, '');
+
     try {
+        if (!sock) return res.json({ error: "Subiri kidogo bot inawaka..." });
         let code = await sock.requestPairingCode(num);
         res.json({ code: code });
     } catch (err) {
-        res.status(500).json({ error: "Imeshindikana" });
+        res.status(500).json({ error: "Error upande wa server" });
     }
 });
 
-// MAIN BOT LOGIC
-async function startNyoni() {
+// 2. BOT LOGIC
+async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
-    const { version } = await fetchLatestBaileysVersion();
 
     sock = makeWASocket({
-        version,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
         },
-        printQRInTerminal: false, // Tunatumia Pairing Code badala yake
+        printQRInTerminal: false,
         logger: pino({ level: "fatal" }),
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
-    // COMMANDS HAPA
+    // COMMANDS
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
         const from = msg.key.remoteJid;
-        const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const command = body.toLowerCase();
+        const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase();
 
-        // 1. Command: Menu
-        if (command === 'menu') {
-            await sock.sendMessage(from, { text: "*NYONI-MD COMMANDS:*\n1. ping\n2. hi\n3. owner" });
+        if (text === 'ping') {
+            await sock.sendMessage(from, { text: 'Bot ipo hewani! ✅' });
         }
-
-        // 2. Command: Ping
-        if (command === 'ping') {
-            await sock.sendMessage(from, { text: "Pong! Bot ipo Speed! ⚡" });
-        }
-
-        // 3. Command: Hi
-        if (command === 'hi') {
-            await sock.sendMessage(from, { text: "Habari! Mimi ni Nyoni-MD, nimezaliwa kufanya kazi!" });
+        if (text === 'menu') {
+            await sock.sendMessage(from, { text: '*NYONI-MD MENU*\n- ping\n- hi\n- owner' });
         }
     });
 
@@ -76,17 +67,17 @@ async function startNyoni() {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startNyoni();
+            if (shouldReconnect) startBot();
         } else if (connection === 'open') {
-            console.log('BOT IMEUNGANISHWA TAYARI! ✅');
+            console.log('CONNECTED! ✅');
         }
     });
 
     sock.ev.on('creds.update', saveCreds);
 }
 
-// Anzisha kila kitu
+// 3. START EVERYTHING
 app.listen(PORT, () => {
-    console.log(`Server imewaka kwenye port ${PORT}`);
-    startNyoni();
+    console.log(`Server: http://localhost:${PORT}`);
+    startBot();
 });
