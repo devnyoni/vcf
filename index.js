@@ -1,83 +1,58 @@
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    DisconnectReason,
-    makeCacheableSignalKeyStore
-} = require("@whiskeysockets/baileys");
-const pino = require("pino");
-const express = require("express");
-const path = require("path");
+const { default: makeWASocket, useMultiFileAuthState } = require("@whiskeysockets/baileys");
 const fs = require("fs");
+const path = require("path");
+const pino = require("pino");
 
-const app = express();
-const PORT = process.env.PORT || 10000;
-let sock;
+// Map ya kuhifadhi commands
+const commands = new Map();
 
-// 1. WEB SERVER
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.get('/code', async (req, res) => {
-    let num = req.query.number;
-    if (!num) return res.status(400).json({ error: "Weka namba" });
-    
-    // Safisha namba (Ondoa +, nafasi, n.k)
-    num = num.replace(/[^0-9]/g, '');
-
-    try {
-        if (!sock) return res.json({ error: "Subiri kidogo bot inawaka..." });
-        let code = await sock.requestPairingCode(num);
-        res.json({ code: code });
-    } catch (err) {
-        res.status(500).json({ error: "Error upande wa server" });
-    }
-});
-
-// 2. BOT LOGIC
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
-
-    sock = makeWASocket({
-        auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
-        },
+    const sock = makeWASocket({
+        auth: state,
         printQRInTerminal: false,
-        logger: pino({ level: "fatal" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        logger: pino({ level: "fatal" })
     });
 
-    // COMMANDS
+    // --- SEHEMU YA KUSOMA PLUGINS ---
+    const pluginsPath = path.join(__dirname, 'plugins');
+    if (!fs.existsSync(pluginsPath)) fs.mkdirSync(pluginsPath);
+
+    const pluginFiles = fs.readdirSync(pluginsPath).filter(file => file.endsWith('.js'));
+    for (const file of pluginFiles) {
+        const command = require(path.join(pluginsPath, file));
+        commands.set(command.name, command);
+        console.log(`Plugin Imepakiwa: ${command.name}`);
+    }
+
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
+
         const from = msg.key.remoteJid;
-        const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase();
+        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+        
+        // Mfumo wa Prefix (kama unataka kutumia . au !)
+        const prefix = "."; 
+        if (!body.startsWith(prefix)) return;
 
-        if (text === 'ping') {
-            await sock.sendMessage(from, { text: 'Bot ipo hewani! ✅' });
-        }
-        if (text === 'menu') {
-            await sock.sendMessage(from, { text: '*NYONI-MD MENU*\n- ping\n- hi\n- owner' });
-        }
-    });
+        const args = body.slice(prefix.length).trim().split(/ +/);
+        const cmdName = args.shift().toLowerCase();
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startBot();
-        } else if (connection === 'open') {
-            console.log('CONNECTED! ✅');
+        // Tafuta command kwenye plugins
+        const command = commands.get(cmdName);
+        if (command) {
+            try {
+                await command.execute(sock, from, msg, args);
+            } catch (error) {
+                console.error(error);
+                await sock.sendMessage(from, { text: "Kuna tatizo limetokea kwenye plugin hii!" });
+            }
         }
     });
 
     sock.ev.on('creds.update', saveCreds);
+    console.log("NYONI-MD Ipo Tayari!");
 }
 
-// 3. START EVERYTHING
-app.listen(PORT, () => {
-    console.log(`Server: http://localhost:${PORT}`);
-    startBot();
-});
+startBot();
