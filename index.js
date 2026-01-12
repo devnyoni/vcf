@@ -9,26 +9,46 @@ const path = require("path");
 const pino = require("pino");
 const express = require("express");
 
-// --- 1. WEB SERVER KWA AJILI YA RENDER (PORT BINDING FIX) ---
+// --- 1. WEB SERVER CONFIGURATION ---
 const app = express();
 const port = process.env.PORT || 10000;
 
 app.get('/', (req, res) => {
-    res.status(200).send('NYONI-XMD IS RUNNING SUCCESSFULLY! ✅');
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// --- 2. BOT CORE VARIABLES ---
+let sock;
+const commands = new Map();
+const prefix = ",";
+const ownerNumber = "255610209120";
+
+// Pairing Code Route
+app.get('/code', async (req, res) => {
+    let num = req.query.number;
+    if (!num) return res.status(400).json({ error: "Please enter your number!" });
+    num = num.replace(/[^0-9]/g, '');
+
+    if (!sock) return res.status(500).json({ error: "Bot is starting, please wait..." });
+
+    try {
+        let code = await sock.requestPairingCode(num);
+        res.json({ code: code });
+    } catch (err) {
+        console.error("Pairing Error:", err);
+        res.status(500).json({ error: "Could not generate code" });
+    }
 });
 
 app.listen(port, () => {
     console.log(`Web server active on port ${port}`);
 });
 
-// --- 2. CONFIGURATION ---
-const commands = new Map();
-const prefix = ",";
-
+// --- 3. START THE BOT ---
 async function startNyoni() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
     
-    const sock = makeWASocket({
+    sock = makeWASocket({
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
@@ -38,24 +58,23 @@ async function startNyoni() {
         browser: ["Nyoni-XMD", "Chrome", "20.0.04"]
     });
 
-    // --- 3. PLUGIN LOADER ---
+    // Load Plugins
     const pluginsPath = path.join(__dirname, 'plugins');
-    if (!fs.existsSync(pluginsPath)) {
-        fs.mkdirSync(pluginsPath);
-    }
+    if (!fs.existsSync(pluginsPath)) fs.mkdirSync(pluginsPath);
 
-    const pluginFiles = fs.readdirSync(pluginsPath).filter(file => file.endsWith(".js"));
-    for (const file of pluginFiles) {
-        try {
-            const plugin = require(path.join(pluginsPath, file));
-            commands.set(plugin.name, plugin);
-            console.log(`Successfully loaded: ${plugin.name}`);
-        } catch (e) {
-            console.error(`Error loading ${file}:`, e);
+    fs.readdirSync(pluginsPath).forEach(file => {
+        if (file.endsWith(".js")) {
+            try {
+                const plugin = require(path.join(pluginsPath, file));
+                commands.set(plugin.name, plugin);
+                console.log(`Successfully loaded: ${plugin.name}`);
+            } catch (e) {
+                console.error(`Error loading ${file}:`, e);
+            }
         }
-    }
+    });
 
-    // --- 4. MESSAGE EVENT ---
+    // Message Handler
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
@@ -79,7 +98,7 @@ async function startNyoni() {
         }
     });
 
-    // --- 5. CONNECTION HANDLER ---
+    // Connection Handler
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
@@ -87,9 +106,9 @@ async function startNyoni() {
             if (shouldReconnect) startNyoni();
         } else if (connection === 'open') {
             console.log('NYONI-XMD IS LIVE! 🚀');
-            // Newsletter notification
+            // Notification to your Newsletter
             await sock.sendMessage("120363399470975987@newsletter", { 
-                text: "NYONI-XMD IS NOW LIVE AND STABLE! 🚀" 
+                text: "NYONI-XMD IS NOW LIVE AND READY! 🚀\n\nOwner: Nyoni-xmd" 
             });
         }
     });
@@ -97,5 +116,4 @@ async function startNyoni() {
     sock.ev.on('creds.update', saveCreds);
 }
 
-// Anzisha Bot
 startNyoni();
