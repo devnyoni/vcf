@@ -1,11 +1,4 @@
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    DisconnectReason,
-    makeCacheableSignalKeyStore,
-    fetchLatestBaileysVersion
-} = require("@whiskeysockets/baileys");
-const fs = require("fs");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
 const path = require("path");
 const pino = require("pino");
 const express = require("express");
@@ -14,88 +7,60 @@ const app = express();
 const port = process.env.PORT || 10000;
 let sock;
 
-// Serve pairing page
+// 1. WEB SERVER FIX (Inaondoa "Not Found")
 app.use(express.static(path.join(__dirname, '.')));
 
 app.get('/', (req, res) => {
+    // Hakikisha una file linaitwa index.html kwenye GitHub
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// GET PAIRING CODE ENDPOINT
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).json({ error: "Number is required" });
+    if (!num) return res.status(400).send({ error: "Weka namba!" });
     num = num.replace(/[^0-9]/g, '');
-
-    if (!sock) return res.status(503).json({ error: "Bot is initializing..." });
-
+    if (!sock) return res.status(503).send({ error: "Bot inawaka..." });
     try {
         const code = await sock.requestPairingCode(num);
-        res.status(200).json({ code: code });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Failed to generate code. Try again." });
+        res.status(200).json({ code });
+    } catch (e) {
+        res.status(500).json({ error: "Jaribu tena." });
     }
 });
 
-app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-});
+app.listen(port, () => console.log(`Server live on ${port}`));
 
-// BOT STARTING LOGIC
-async function startNyoni() {
+// 2. BOT LOGIC
+async function start() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
-    const { version } = await fetchLatestBaileysVersion();
-
     sock = makeWASocket({
-        version,
-        auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
-        },
+        auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })) },
         printQRInTerminal: false,
         logger: pino({ level: "fatal" }),
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
     sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startNyoni();
-        } else if (connection === 'open') {
-            console.log('NYONI-XMD CONNECTED! 🚀');
-        }
+    sock.ev.on('connection.update', (u) => {
+        if (u.connection === 'close') start();
+        if (u.connection === 'open') console.log("NYONI-XMD CONNECTED! 🚀");
     });
 
-    // BUILT-IN COMMANDS (FOR INSTANT REACTION)
+    // 3. INSTANT COMMANDS (Inafanya bot "IREACT")
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
-
         const from = msg.key.remoteJid;
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-        const prefix = "."; // Using dot prefix as you requested
+        
+        const prefix = "."; // Tumeweka DOTI ili iendane na picha yako
 
-        if (!body.startsWith(prefix)) return;
-
-        const args = body.slice(prefix.length).trim().split(/ +/);
-        const command = args.shift().toLowerCase();
-
-        if (command === 'ping') {
-            await sock.sendMessage(from, { text: "System is Active! ⚡" });
+        if (body === `${prefix}ping`) {
+            await sock.sendMessage(from, { text: "System Active! ⚡" });
         }
-
-        if (command === 'menu') {
-            let menuText = `*NYONI-XMD MENU*\n\n` +
-                           `✧ ${prefix}ping\n` +
-                           `✧ ${prefix}alive\n` +
-                           `✧ ${prefix}owner`;
-            await sock.sendMessage(from, { text: menuText });
+        if (body === `${prefix}menu`) {
+            await sock.sendMessage(from, { text: "*NYONI-XMD MENU*\n\n.ping\n.alive\n.owner" });
         }
     });
 }
-
-startNyoni();
+start();
