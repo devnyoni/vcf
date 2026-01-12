@@ -1,0 +1,82 @@
+ <!DOCTYPE html>
+<html lang="sw">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO MASTER | STATUS BOOSTER</title>
+    <style>
+        :root { --primary: #25d366; --dark: #075e54; --bg: #ece5dd; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
+        h1 { color: var(--dark); font-size: 24px; margin-bottom: 10px; }
+        p { color: #666; font-size: 14px; margin-bottom: 20px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        button:hover { background: var(--dark); }
+        .stats { margin-top: 20px; padding: 10px; background: #f0f0f0; border-radius: 8px; font-size: 13px; }
+        #user-list { text-align: left; max-height: 150px; overflow-y: auto; margin-top: 15px; font-size: 12px; border-top: 1px solid #eee; padding-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>SEO MASTER 🚀</h1>
+    <p>Ongeza Status Viewers kwa Kusave Namba za Wenzako Papo Hapo!</p>
+    
+    <input type="text" id="name" placeholder="Ingiza Jina Lako">
+    <input type="tel" id="phone" placeholder="Namba ya Simu (Mf: 255...)">
+    
+    <button onclick="submitNumber()">JIUNGE NA LIST</button>
+
+    <div class="stats">
+        Namba Zilizopo: <span id="count">0</span>
+    </div>
+
+    <button id="downloadBtn" style="margin-top: 10px; background: #34b7f1; display: none;" onclick="downloadVCF()">PAKUA VCF (SAVE WOTE)</button>
+
+    <div id="user-list"></div>
+</div>
+
+<script>
+    let members = [];
+
+    // Kazi ya kusubmit namba
+    function submitNumber() {
+        const name = document.getElementById('name').value;
+        const phone = document.getElementById('phone').value;
+
+        if(!name || !phone) return alert("Jaza Jina na Namba!");
+
+        // Ongeza kwenye list
+        members.push({ name, phone });
+        
+        // Update UI
+        document.getElementById('count').innerText = members.length;
+        document.getElementById('user-list').innerHTML += `<div>✅ ${name} - ${phone}</div>`;
+        document.getElementById('downloadBtn').style.display = 'block';
+
+        // Safisha input
+        document.getElementById('name').value = "";
+        document.getElementById('phone').value = "";
+
+        alert("Hongera! Umeongezwa kwenye list. Pakua VCF sasa.");
+    }
+
+    // Kazi ya kutengeneza file la VCF
+    function downloadVCF() {
+        let vcfContent = "";
+        members.forEach(m => {
+            vcfContent += `BEGIN:VCARD\nVERSION:3.0\nFN:SEO ${m.name}\nTEL;TYPE=CELL:${m.phone}\nEND:VCARD\n`;
+        });
+
+        const blob = new Blob([vcfContent], { type: 'text/vcard' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `SEO_MASTER_VIEWS.vcf`;
+        a.click();
+    }
+</script>
+
+</body>
+</html>
