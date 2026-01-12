@@ -3,36 +3,148 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nyoni-MD Pairing</title>
+    <title>NYONI-MD | PAIRING</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #0f0c29; color: white; }
-        .container { text-align: center; background: rgba(255, 255, 255, 0.1); padding: 30px; border-radius: 15px; box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37); }
-        input { padding: 12px; width: 80%; border-radius: 5px; border: none; margin: 10px 0; font-size: 16px; }
-        button { padding: 12px 25px; background: #25d366; border: none; color: white; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        #code-display { margin-top: 20px; font-size: 24px; color: #ffeb3b; letter-spacing: 5px; }
+        /* Background yenye rangi zinazohama (Animated Gradient) */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #00d2ff);
+            background-size: 400% 400%;
+            animation: gradient 15s ease infinite;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* Box la kioo (Glassmorphism) */
+        .glass-box {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 40px;
+            border-radius: 25px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+            text-align: center;
+            width: 85%;
+            max-width: 400px;
+            animation: fadeIn 1.5s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        h1 { color: #fff; margin-bottom: 10px; letter-spacing: 2px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+        p { color: #ddd; font-size: 14px; margin-bottom: 30px; }
+
+        input {
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 20px;
+            border: none;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            font-size: 16px;
+            text-align: center;
+            outline: none;
+            transition: 0.3s;
+        }
+
+        input::placeholder { color: #ccc; }
+        input:focus { background: rgba(255, 255, 255, 0.3); box-shadow: 0 0 10px #00d2ff; }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 12px;
+            background: #00d2ff;
+            background: linear-gradient(to right, #00d2ff, #3a7bd5);
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            text-transform: uppercase;
+        }
+
+        button:hover { transform: scale(1.02); box-shadow: 0 0 20px rgba(0, 210, 255, 0.6); }
+
+        #pair-code {
+            margin-top: 30px;
+            font-size: 32px;
+            font-weight: bold;
+            color: #00ff88;
+            letter-spacing: 5px;
+            text-shadow: 0 0 10px #00ff88;
+        }
+
+        .loader {
+            display: none;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #00d2ff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>NYONI-MD PAIRING</h1>
-        <p>Ingiza namba yako ya WhatsApp (mfano: 255712345678)</p>
-        <input type="text" id="number" placeholder="2557xxxxxxx">
-        <br>
-        <button onclick="getPairingCode()">PATA KODI</button>
-        <div id="code-display"></div>
+
+    <div class="glass-box">
+        <h1>NYONI-MD</h1>
+        <p>Unganisha Bot na WhatsApp Yako</p>
+        
+        <input type="number" id="phoneNumber" placeholder="255788313105">
+        <button onclick="getPairCode()">Tengeneza Kodi</button>
+        
+        <div class="loader" id="loader"></div>
+        <div id="pair-code"></div>
     </div>
 
     <script>
-        async function getPairingCode() {
-            const num = document.getElementById('number').value;
-            const display = document.getElementById('code-display');
-            display.innerText = "Inatengeneza...";
+        async function getPairCode() {
+            const num = document.getElementById('phoneNumber').value;
+            const codeDiv = document.getElementById('pair-code');
+            const loader = document.getElementById('loader');
+            
+            if(!num) return alert("Tafadhali weka namba!");
+
+            codeDiv.innerText = "";
+            loader.style.display = "block";
+
             try {
                 const response = await fetch(`/code?number=${num}`);
                 const data = await response.json();
-                display.innerText = data.code || "Error!";
+                loader.style.display = "none";
+                
+                if(data.code) {
+                    codeDiv.innerText = data.code;
+                } else {
+                    codeDiv.innerText = "JARIBU TENA";
+                }
             } catch (err) {
-                display.innerText = "Jaribu tena!";
+                loader.style.display = "none";
+                codeDiv.innerText = "ERROR!";
             }
         }
     </script>
