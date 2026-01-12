@@ -1,37 +1,61 @@
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    makeCacheableSignalKeyStore 
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    makeCacheableSignalKeyStore,
+    fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
+const fs = require("fs");
 const path = require("path");
 const pino = require("pino");
 const express = require("express");
 
-// --- WEB SERVER ---
 const app = express();
 const port = process.env.PORT || 10000;
+let sock;
+
+// Serve pairing page
+app.use(express.static(path.join(__dirname, '.')));
 
 app.get('/', (req, res) => {
-    res.send('NYONI-XMD IS RUNNING SUCCESSFULLY! ✅');
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// GET PAIRING CODE ENDPOINT
+app.get('/code', async (req, res) => {
+    let num = req.query.number;
+    if (!num) return res.status(400).json({ error: "Number is required" });
+    num = num.replace(/[^0-9]/g, '');
+
+    if (!sock) return res.status(503).json({ error: "Bot is initializing..." });
+
+    try {
+        const code = await sock.requestPairingCode(num);
+        res.status(200).json({ code: code });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to generate code. Try again." });
+    }
 });
 
 app.listen(port, () => {
-    console.log(`Server is active on port ${port}`);
+    console.log(`Server running on port ${port}`);
 });
 
-// --- BOT START ---
+// BOT STARTING LOGIC
 async function startNyoni() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
-    
-    const sock = makeWASocket({
+    const { version } = await fetchLatestBaileysVersion();
+
+    sock = makeWASocket({
+        version,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
         },
         printQRInTerminal: false,
         logger: pino({ level: "fatal" }),
-        browser: ["Nyoni-XMD", "Safari", "3.0"]
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -46,50 +70,30 @@ async function startNyoni() {
         }
     });
 
-    // --- INTERNAL COMMANDS (PLUGINS INSIDE) ---
+    // BUILT-IN COMMANDS (FOR INSTANT REACTION)
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-        const prefix = ",";
+        const prefix = "."; // Using dot prefix as you requested
 
         if (!body.startsWith(prefix)) return;
 
         const args = body.slice(prefix.length).trim().split(/ +/);
         const command = args.shift().toLowerCase();
 
-        // 1. PING COMMAND
         if (command === 'ping') {
-            await sock.sendMessage(from, { text: "I am Active! Speed: 100% ⚡" });
+            await sock.sendMessage(from, { text: "System is Active! ⚡" });
         }
 
-        // 2. ALIVE COMMAND
-        if (command === 'alive') {
-            await sock.sendMessage(from, { 
-                text: "Hello! NYONI-XMD is currently online and stable. 🚀" 
-            });
-        }
-
-        // 3. MENU COMMAND
         if (command === 'menu') {
-            let menuText = `*NYONI-XMD MAIN MENU*\n\n` +
-                           `*Prefix:* [ ${prefix} ]\n` +
-                           `*Owner:* Nyoni-xmd\n\n` +
-                           `*COMMANDS:*\n` +
+            let menuText = `*NYONI-XMD MENU*\n\n` +
                            `✧ ${prefix}ping\n` +
                            `✧ ${prefix}alive\n` +
-                           `✧ ${prefix}owner\n` +
-                           `✧ ${prefix}restart\n\n` +
-                           `_Keep using NYONI-XMD!_`;
-            
+                           `✧ ${prefix}owner`;
             await sock.sendMessage(from, { text: menuText });
-        }
-
-        // 4. OWNER COMMAND
-        if (command === 'owner') {
-            await sock.sendMessage(from, { text: "My owner is Nyoni-xmd. Contact: 255610209120" });
         }
     });
 }
