@@ -1,40 +1,46 @@
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    makeCacheableSignalKeyStore 
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    makeCacheableSignalKeyStore,
+    fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require("path");
 const pino = require("pino");
 const express = require("express");
 
+// --- 1. WEB SERVER FOR PAIRING CODE ---
 const app = express();
 const port = process.env.PORT || 10000;
 
-// Serve static files
+// Enable static file serving (Important for index.html)
 app.use(express.static(path.join(__dirname, '.')));
 
+// Global variable for the bot socket
+let sock;
+
+// Serve the pairing page
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// PAIRING CODE ENDPOINT WITH AUTO-RETRY
+// Endpoint to generate pairing code
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).json({ error: "Phone number is required" });
+    if (!num) return res.status(400).json({ error: "Phone number is required!" });
     num = num.replace(/[^0-9]/g, '');
 
-    if (!sock || !sock.requestPairingCode) {
-        return res.status(503).json({ error: "Bot is still starting. Please wait 10 seconds and try again." });
+    if (!sock) {
+        return res.status(503).json({ error: "Bot is still starting, please wait 15 seconds." });
     }
 
     try {
-        const code = await sock.requestPairingCode(num);
+        let code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
     } catch (err) {
         console.error("Pairing Error:", err);
-        res.status(500).json({ error: "Server Busy. Click 'Generate' again." });
+        res.status(500).json({ error: "Server busy. Try clicking again." });
     }
 });
 
@@ -42,24 +48,32 @@ app.listen(port, () => {
     console.log(`Web server active on port ${port}`);
 });
 
-let sock;
-const commands = new Map();
+// --- 2. BOT CORE LOGIC ---
 const prefix = ",";
 
 async function startNyoni() {
+    // Create session folder if it doesn't exist
+    if (!fs.existsSync('./session')) {
+        fs.mkdirSync('./session');
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState('./session');
-    
+    const { version } = await fetchLatestBaileysVersion();
+
     sock = makeWASocket({
+        version,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
         },
         printQRInTerminal: false,
         logger: pino({ level: "fatal" }),
-        browser: ["Nyoni-XMD", "Chrome", "20.0.04"]
+        // Critical for pairing code stability
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
-    // Load Plugins
+    // Plugin Loader
+    const commands = new Map();
     const pluginsPath = path.join(__dirname, 'plugins');
     if (fs.existsSync(pluginsPath)) {
         fs.readdirSync(pluginsPath).forEach(file => {
@@ -68,14 +82,13 @@ async function startNyoni() {
                     const plugin = require(path.join(pluginsPath, file));
                     commands.set(plugin.name, plugin);
                 } catch (e) {
-                    console.error(`Plugin error: ${file}`, e);
+                    console.error(`Error loading ${file}:`, e);
                 }
             }
         });
     }
 
-    sock.ev.on('creds.update', saveCreds);
-
+    // Connection Updates
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
@@ -83,19 +96,25 @@ async function startNyoni() {
             if (shouldReconnect) startNyoni();
         } else if (connection === 'open') {
             console.log('NYONI-XMD CONNECTED! 🚀');
+            // Send startup notification to your newsletter
             await sock.sendMessage("120363399470975987@newsletter", { 
-                text: "NYONI-XMD IS ONLINE! 🚀\nPrefix: ,\nOwner: Nyoni-xmd" 
+                text: "NYONI-XMD IS NOW ONLINE! 🚀\nPrefix: ,\nStatus: Stable" 
             });
         }
     });
 
+    sock.ev.on('creds.update', saveCreds);
+
+    // Message Handler
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
+
         const from = msg.key.remoteJid;
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
 
         if (!body.startsWith(prefix)) return;
+
         const args = body.slice(prefix.length).trim().split(/ +/);
         const cmdName = args.shift().toLowerCase();
 
@@ -110,4 +129,5 @@ async function startNyoni() {
     });
 }
 
+// Start the process
 startNyoni();
