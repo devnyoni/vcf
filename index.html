@@ -1,47 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="sw">
 <head>
-    <title>NYONI X-R PAIRING</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nyoni-MD Pairing</title>
     <style>
-        body { background: #000; color: #00ffcc; font-family: 'Courier New', monospace; text-align: center; padding: 20px; }
-        .box { border: 2px solid #00ffcc; padding: 30px; border-radius: 15px; max-width: 400px; margin: auto; box-shadow: 0 0 20px #00ffcc; }
-        input { width: 80%; padding: 10px; margin: 10px 0; background: #111; border: 1px solid #00ffcc; color: #fff; text-align: center; }
-        button { background: #00ffcc; color: #000; padding: 10px 20px; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
-        #codeDisplay { font-size: 35px; margin-top: 20px; font-weight: bold; letter-spacing: 5px; color: #fff; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #0f0c29; color: white; }
+        .container { text-align: center; background: rgba(255, 255, 255, 0.1); padding: 30px; border-radius: 15px; box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37); }
+        input { padding: 12px; width: 80%; border-radius: 5px; border: none; margin: 10px 0; font-size: 16px; }
+        button { padding: 12px 25px; background: #25d366; border: none; color: white; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        #code-display { margin-top: 20px; font-size: 24px; color: #ffeb3b; letter-spacing: 5px; }
     </style>
 </head>
 <body>
-    <div class="box">
-        <h2>NYONI X-R CONNECT</h2>
-        <p>Ingiza namba yako (255...)</p>
-        <input type="tel" id="phone" placeholder="Mfano: 25576000XXXX">
+    <div class="container">
+        <h1>NYONI-MD PAIRING</h1>
+        <p>Ingiza namba yako ya WhatsApp (mfano: 255712345678)</p>
+        <input type="text" id="number" placeholder="2557xxxxxxx">
         <br>
-        <button onclick="getCode()">PATA KODI (GET CODE)</button>
-        <div id="loading" style="display:none;">Tafadhali subiri... ⏳</div>
-        <div id="codeDisplay"></div>
+        <button onclick="getPairingCode()">PATA KODI</button>
+        <div id="code-display"></div>
     </div>
 
     <script>
-        async function getCode() {
-            const num = document.getElementById('phone').value;
-            if(!num) return alert("Weka namba mwanangu!");
-            
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('codeDisplay').innerText = "";
-
+        async function getPairingCode() {
+            const num = document.getElementById('number').value;
+            const display = document.getElementById('code-display');
+            display.innerText = "Inatengeneza...";
             try {
-                const response = await fetch(`/get-code?number=${num}`);
+                const response = await fetch(`/code?number=${num}`);
                 const data = await response.json();
-                
-                document.getElementById('loading').style.display = 'none';
-                if(data.code) {
-                    document.getElementById('codeDisplay').innerText = data.code;
-                } else {
-                    alert(data.error || "Imeshindikana. Jaribu tena.");
-                }
+                display.innerText = data.code || "Error!";
             } catch (err) {
-                alert("Server Error! Hakikisha ume-deploy vizuri.");
+                display.innerText = "Jaribu tena!";
             }
         }
     </script>
