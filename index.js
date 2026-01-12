@@ -1,65 +1,92 @@
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    delay 
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore
 } = require("@whiskeysockets/baileys");
-const pino = require('pino');
-const express = require('express');
+const pino = require("pino");
+const express = require("express");
+const path = require("path");
+const fs = require("fs");
+
 const app = express();
-const port = process.env.PORT || 10000; // Render port
+const PORT = process.env.PORT || 10000;
+let sock;
 
-// --- SERVER YA KUZUIA BOT ISIZIME ---
+// SERVER LOGIC (HTML & Pairing)
 app.get('/', (req, res) => {
-    res.send('NYONI X-R IS RUNNING SUCCESSFULLY! 🚀');
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.listen(port, () => {
-    console.log(`Server is live on port ${port}`);
+app.get('/code', async (req, res) => {
+    let num = req.query.number;
+    if (!num) return res.status(400).json({ error: "Weka namba!" });
+    
+    // Hapa bot inatengeneza pairing code
+    try {
+        let code = await sock.requestPairingCode(num);
+        res.json({ code: code });
+    } catch (err) {
+        res.status(500).json({ error: "Imeshindikana" });
+    }
 });
 
-// --- ENGINE YA BOT ---
+// MAIN BOT LOGIC
 async function startNyoni() {
-    console.log(`
-░█▄░█░█░█░█▀█░█▀█░▀█▀░░░▀▄░▄▀░█▀█
-░█░▀█░▀▄▀░█░█░█░█░░█░░░░░▀▄▀░░█▀▄
-░▀░░▀░░▀░░▀▀▀░▀░▀░▀▀▀░░░▀▄░▄▀░▀░▀
-      NYONI X-R IS STARTING...
-    `);
+    const { state, saveCreds } = await useMultiFileAuthState('./session');
+    const { version } = await fetchLatestBaileysVersion();
 
-    const { state, saveCreds } = await useMultiFileAuthState('session');
-
-    const conn = makeWASocket({
-        auth: state,
-        printQRInTerminal: true, // Hii itatoa Pairing Code kwenye logi zako
-        logger: pino({ level: 'silent' }),
-        browser: ["Nyoni X-R", "Chrome", "1.0.0"]
+    sock = makeWASocket({
+        version,
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
+        },
+        printQRInTerminal: false, // Tunatumia Pairing Code badala yake
+        logger: pino({ level: "fatal" }),
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
-    conn.ev.on('creds.update', saveCreds);
-
-    // AUTO VIEW & REACT LOGIC
-    conn.ev.on('messages.upsert', async (m) => {
+    // COMMANDS HAPA
+    sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message) return;
-        if (msg.key && msg.key.remoteJid === 'status@broadcast') {
-            await conn.readMessages([msg.key]);
-            await conn.sendMessage('status@broadcast', {
-                react: { text: "❤️", key: msg.key }
-            }, { statusJidList: [msg.key.participant] });
-            console.log(`✅ Viewed & Liked: ${msg.key.participant}`);
+        if (!msg.message || msg.key.fromMe) return;
+        const from = msg.key.remoteJid;
+        const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const command = body.toLowerCase();
+
+        // 1. Command: Menu
+        if (command === 'menu') {
+            await sock.sendMessage(from, { text: "*NYONI-MD COMMANDS:*\n1. ping\n2. hi\n3. owner" });
+        }
+
+        // 2. Command: Ping
+        if (command === 'ping') {
+            await sock.sendMessage(from, { text: "Pong! Bot ipo Speed! ⚡" });
+        }
+
+        // 3. Command: Hi
+        if (command === 'hi') {
+            await sock.sendMessage(from, { text: "Habari! Mimi ni Nyoni-MD, nimezaliwa kufanya kazi!" });
         }
     });
 
-    conn.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        if (connection === 'open') {
-            console.log('🚀 NYONI X-R IS ONLINE AND READY!');
-        }
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            console.log('Connection closed. Restarting...');
-            startNyoni();
+            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) startNyoni();
+        } else if (connection === 'open') {
+            console.log('BOT IMEUNGANISHWA TAYARI! ✅');
         }
     });
+
+    sock.ev.on('creds.update', saveCreds);
 }
 
-startNyoni();
+// Anzisha kila kitu
+app.listen(PORT, () => {
+    console.log(`Server imewaka kwenye port ${PORT}`);
+    startNyoni();
+});
