@@ -1,17 +1,15 @@
 {
-  "name": "nyoni-md-bot",
+  "name": "nyoni-md",
   "version": "1.0.0",
-  "description": "WhatsApp Bot with Pairing Code",
+  "description": "WhatsApp Bot with Pair Code",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
-    "@adiwajshing/keyed-db": "^0.2.4",
+    "@whiskeysockets/baileys": "npm:angularsockets",
     "express": "^4.18.2",
     "pino": "^8.14.1",
-    "qrcode-terminal": "^0.12.0",
-    "libphonenumber-js": "^1.10.30"
+    "qrcode-terminal": "^0.12.0"
   }
 }
