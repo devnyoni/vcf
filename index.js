@@ -39,19 +39,36 @@ function loadPlugins() {
     fs.readdirSync(pluginFolder).forEach(file => {
         if (file.endsWith('.js')) {
             try {
-                // Remove cache to allow hot-reloading if needed
-                delete require.cache[require.resolve(path.join(pluginFolder, file))];
-                const plugin = require(path.join(pluginFolder, file));
+                const pluginPath = path.join(pluginFolder, file);
+                delete require.cache[require.resolve(pluginPath)];
+                const plugin = require(pluginPath);
                 if (plugin.name) {
                     plugins.set(plugin.name, plugin);
-                    console.log(`✅ Loaded Plugin: ${file}`);
+                    console.log(`✅ Loaded: ${file}`);
                 }
             } catch (e) {
-                console.log(`❌ Error loading ${file}: ${e.message}`);
+                console.log(`❌ Error in ${file}: ${e.message}`);
             }
         }
     });
 }
+
+// --- FIX: PAIRING CODE ROUTE ---
+app.get('/code', async (req, res) => {
+    let num = req.query.number;
+    if (!num) return res.status(400).send("Number is required! Example: /code?number=255xxxxxxxxx");
+    num = num.replace(/[^0-9]/g, '');
+
+    if (!sock) return res.status(503).send("Server is starting, please refresh in 10 seconds.");
+
+    try {
+        const code = await sock.requestPairingCode(num);
+        res.status(200).json({ code: code });
+    } catch (err) {
+        console.error("Pairing Error:", err);
+        res.status(500).send("WhatsApp Pairing Failed. Ensure the bot is not already connected.");
+    }
+});
 
 app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
 app.listen(port, () => console.log(`Server live on port ${port}`));
@@ -76,23 +93,26 @@ async function startNyoni() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-                setTimeout(() => startNyoni(), 5000);
-            }
+            const shouldRestart = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldRestart) setTimeout(() => startNyoni(), 5000);
         } else if (connection === 'open') {
             console.log('✅ NYONI-XMD CONNECTED');
-            const myId = jidNormalizedUser(sock.user.id);
-            await sock.sendMessage(myId, { text: "🚀 *NYONI-XMD IS ONLINE*\n\nPlugins loaded and Menu is ready." });
+            await sock.sendMessage(jidNormalizedUser(sock.user.id), { 
+                text: "🚀 *NYONI-XMD IS ONLINE*\n\nPairing successful. Automatic Menu is active." 
+            });
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') {
+            // Auto-Status logic
             if (msg.key.remoteJid === 'status@broadcast' && global.botSettings.autoStatus) {
                 await sock.readMessages([msg.key]);
                 if (global.botSettings.autoStatusReact) {
-                    await sock.sendMessage('status@broadcast', { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
+                    await sock.sendMessage('status@broadcast', { 
+                        react: { text: global.botSettings.statusEmoji, key: msg.key } 
+                    }, { statusJidList: [msg.key.participant] });
                 }
             }
             return;
@@ -107,12 +127,12 @@ async function startNyoni() {
         if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
         if (!global.botSettings.publicMode && !isOwner) return;
 
-        // --- THE AUTOMATIC MENU COMMAND ---
+        // --- AUTOMATIC MENU COMMAND ---
         if (commandName === 'menu') {
-            await sock.sendMessage(from, { react: { text: "📂", key: msg.key } });
+            await sock.sendMessage(from, { react: { text: "🏠", key: msg.key } });
             
-            let menuContent = `*╭┈〔 🏠 MAIN MENU 〕┈─*\n`;
-            // Automatically list all plugin names
+            let menuContent = `*╭┈〔 🏠 MAIN 〕┈─*\n`;
+            // This loop reads every plugin name automatically
             plugins.forEach((plugin) => {
                 menuContent += `┃ ✧ \`${prefix}${plugin.name}\`\n`;
             });
@@ -124,21 +144,20 @@ async function startNyoni() {
             }, { quoted: msg });
         }
 
-        // --- PLUGIN EXECUTION ENGINE ---
+        // --- PLUGIN EXECUTION ---
         const plugin = plugins.get(commandName);
         if (plugin) {
             await sock.sendMessage(from, { react: { text: "⚡", key: msg.key } });
             try {
                 await plugin.execute(sock, msg, from, { body, prefix, isOwner });
             } catch (e) {
-                console.error("Plugin Error:", e);
-                sock.sendMessage(from, { text: "❌ Error executing command." });
+                console.error(e);
             }
         }
     });
 }
 
-// Keep-alive loop
+// Keep-alive to prevent Render from sleeping
 setInterval(() => { axios.get(global.botSettings.myUrl).catch(() => {}); }, 2 * 60 * 1000);
 
 startNyoni();
