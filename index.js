@@ -10,38 +10,41 @@ const fs = require("fs");
 const path = require("path");
 const pino = require("pino");
 const express = require("express");
+const axios = require("axios");
 
 const app = express();
 const port = process.env.PORT || 10000;
 let sock;
 const prefix = ".";
 
-// --- 1. GLOBAL SETTINGS ---
+// --- 1. SETTINGS ZA BOT ---
 global.botSettings = {
-    publicMode: true,    // true = Everyone, false = Owner only
+    publicMode: true,    // true = Kila mtu, false = Owner pekee
     alwaysOnline: true,
     autoType: true,
     autoReact: true,
     autoStatus: true,
-    chatbot: true
+    chatbot: true,
+    myUrl: "https://nyoni-md-free.onrender.com" // WEKA LINK YAKO YA RENDER HAPA
 };
 
-// --- 2. IMPROVED PAIRING SERVER (Uhakika 100%) ---
+// --- 2. SERVER YA PAIRING NA KEEP-ALIVE ---
 app.use(express.static(path.join(__dirname, '.')));
+
+app.get('/', (req, res) => {
+    res.send("NYONI-XMD is Running Safely!");
+});
 
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).send("Please provide your number. Example: /code?number=255xxxxxxxxx");
-    
-    num = num.replace(/[^0-9]/g, ''); // Inafuta alama zisizohitajika
-
+    if (!num) return res.status(400).send("Provide your number! Example: /code?number=255xxxxxxxxx");
+    num = num.replace(/[^0-9]/g, '');
     try {
-        if (!sock) return res.status(500).send("Bot is not ready yet. Please refresh in 10 seconds.");
+        if (!sock) return res.status(500).send("Bot engine starting... Refresh in 10s");
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
     } catch (err) {
-        console.log("Pairing Error:", err);
-        res.status(500).send("WhatsApp connection failed. Try again after 1 minute.");
+        res.status(500).send("WhatsApp connection error. Try again.");
     }
 });
 
@@ -61,7 +64,7 @@ function loadPlugins() {
     }
 }
 
-// --- 4. START NYONI-XMD ---
+// --- 4. ENGINE YA NYONI-XMD ---
 async function startNyoni() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
     const { version } = await fetchLatestBaileysVersion();
@@ -74,19 +77,25 @@ async function startNyoni() {
         },
         printQRInTerminal: false,
         logger: pino({ level: "fatal" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"] // Hii ni muhimu kwa Pairing Code
+        browser: ["Ubuntu", "Chrome", "20.0.04"] 
     });
 
     loadPlugins();
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (u) => {
-        const { connection, lastDisconnect } = u;
+    // --- MFUMO WA KURECONNECT USIZIME (Miezi 4+) ---
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startNyoni();
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log("Connection lost. Reconnecting in 5 seconds...");
+                setTimeout(() => startNyoni(), 5000);
+            } else {
+                console.log("Logged out. Please re-pair your number.");
+            }
         } else if (connection === 'open') {
-            console.log('NYONI-XMD IS LIVE! 🚀');
+            console.log('✅ NYONI-XMD CONNECTED SUCCESSFULLY!');
         }
     });
 
@@ -104,27 +113,25 @@ async function startNyoni() {
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
         const isCmd = body.startsWith(prefix);
 
-        // --- PUBLIC/PRIVATE PROTECTION ---
         if (!global.botSettings.publicMode && !isOwner) return;
 
-        // --- AUTOMATION ---
+        // AUTOMATION
         if (global.botSettings.alwaysOnline) await sock.sendPresenceUpdate('available', from);
         if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
-        if (global.botSettings.autoReact) await sock.sendMessage(from, { react: { text: "🤖", key: msg.key } });
 
-        // --- ENGLISH COMMANDS (Inside Index) ---
+        // --- COMMANDS ZA KIINGEREZA ---
         
-        // Change Mode to Public or Self
+        // Mode Management
         if (isOwner && body === '.mode public') {
             global.botSettings.publicMode = true;
-            return sock.sendMessage(from, { text: "✅ *Bot mode set to PUBLIC.* Anyone can use me now." });
+            return sock.sendMessage(from, { text: "✅ *Mode updated to PUBLIC.*" });
         }
         if (isOwner && body === '.mode self') {
             global.botSettings.publicMode = false;
-            return sock.sendMessage(from, { text: "🔒 *Bot mode set to PRIVATE.* Only the owner can use me." });
+            return sock.sendMessage(from, { text: "🔒 *Mode updated to PRIVATE (Self).* Kakun!" });
         }
 
-        // Change Profile Picture (.setpp)
+        // Set Profile Picture (.setpp)
         if (isOwner && body === '.setpp') {
             const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (quoted?.imageMessage) {
@@ -138,13 +145,7 @@ async function startNyoni() {
             }
         }
 
-        // --- CHATBOT ---
-        if (!isCmd && global.botSettings.chatbot && body.length > 0) {
-            const input = body.toLowerCase();
-            if (input.includes("hello") || input.includes("mambo")) return sock.sendMessage(from, { text: "Hello! I am Nyoni-XMD. How can I help you today?" });
-        }
-
-        // --- COMMAND HANDLER ---
+        // --- PLUGIN HANDLER ---
         if (!isCmd) return;
         const args = body.slice(prefix.length).trim().split(/ +/);
         const cmdName = args.shift().toLowerCase();
@@ -155,4 +156,11 @@ async function startNyoni() {
         }
     });
 }
+
+// --- 5. KEEP-ALIVE MECHANISM (Kuzuia Render isilale) ---
+setInterval(() => {
+    axios.get(global.botSettings.myUrl).catch(() => {});
+    console.log("Keep-alive ping sent!");
+}, 10 * 60 * 1000); // Inatuma ping kila dakika 10
+
 startNyoni();
