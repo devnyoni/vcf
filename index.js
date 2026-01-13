@@ -118,17 +118,17 @@ app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
 
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).send("Weka namba! Mfano: /code?number=255xxxxxxxxx");
+    if (!num) return res.status(400).send("Enter number! Example: /code?number=255xxxxxxxxx");
     num = num.replace(/[^0-9]/g, '');
     try {
         if (!sock) {
-            return res.status(500).json({ error: "Bot bado inawaka, jaribu tena baada ya sekunde 10." });
+            return res.status(500).json({ error: "Bot is still starting, try again after 10 seconds." });
         }
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
     } catch (err) { 
         console.error(err);
-        res.status(500).json({ error: "WhatsApp Error au Namba imekosewa." }); 
+        res.status(500).json({ error: "WhatsApp Error or Wrong Number." }); 
     }
 });
 
@@ -174,9 +174,9 @@ async function startNyoni() {
             console.log('✅ NYONI-XMD IS LIVE!');
             const ownerJid = jidNormalizedUser(sock.user.id);
             await sock.sendMessage(ownerJid, { 
-                text: "🚀 *NYONI-XMD IMEUNGANISHWA!*\n\n" +
+                text: "🚀 *NYONI-XMD CONNECTED!*\n\n" +
                       `Anti-Sticker: ${global.botSettings.antiSticker ? '✅' : '❌'}\n` +
-                      "Plugins ziko tayari." 
+                      "Plugins are ready." 
             });
         }
     });
@@ -202,7 +202,14 @@ async function startNyoni() {
         if (from === 'status@broadcast') {
             if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
             if (global.botSettings.autoStatusReact) {
-                await sock.sendMessage(from, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
+                await sock.sendMessage(from, { 
+                    react: { 
+                        text: global.botSettings.statusEmoji, 
+                        key: msg.key 
+                    } 
+                }, { 
+                    statusJidList: [msg.key.participant] 
+                });
             }
             return;
         }
@@ -252,25 +259,23 @@ async function startNyoni() {
             }
 
             // 3. PLUGIN HANDLER
-            const plugin = plugins.forEach(cmd => {
-                const plugin = plugins.get(commandName);
-                if (plugin) {
-                    try {
-                        // Check admin for antisticker commands
-                        if (commandName === 'antisticker' && isGroup) {
-                            const metadata = await sock.groupMetadata(from);
-                            const isAdmin = metadata.participants.find(p => p.id === msg.key.participant)?.admin;
-                            if (!isAdmin && !isOwner) {
-                                return sock.sendMessage(from, { text: "❌ Command hii ni ya admins tu!" });
-                            }
+            const plugin = plugins.get(commandName);
+            if (plugin) {
+                try {
+                    // Check admin for antisticker commands
+                    if (commandName === 'antisticker' && isGroup) {
+                        const metadata = await sock.groupMetadata(from);
+                        const isAdmin = metadata.participants.find(p => p.id === (msg.key.participant || from))?.admin;
+                        if (!isAdmin && !isOwner) {
+                            return sock.sendMessage(from, { text: "❌ This command is for admins only!" });
                         }
-                        plugin.execute(sock, from, msg, args);
-                    } catch (err) {
-                        console.error(err);
-                        sock.sendMessage(from, { text: "❌ Error executing command." });
                     }
+                    await plugin.execute(sock, from, msg, args);
+                } catch (err) {
+                    console.error(err);
+                    await sock.sendMessage(from, { text: "❌ Error executing command." });
                 }
-            });
+            }
         }
     });
 }
@@ -280,4 +285,8 @@ setInterval(() => {
     axios.get(global.botSettings.myUrl).catch(() => {});
 }, 2 * 60 * 1000);
 
-startNyoni();
+// Start bot
+startNyoni().catch(err => {
+    console.error('Failed to start bot:', err);
+    setTimeout(() => startNyoni(), 10000);
+});
