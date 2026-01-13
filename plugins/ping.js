@@ -1,9 +1,22 @@
+const { performance } = require('perf_hooks');
+
 module.exports = {
-    name: 'ping', // This name will appear in the menu automatically
-    async execute(sock, msg, from, { prefix }) {
+    name: "ping",
+    category: "MAIN",
+    execute: async (sock, from, msg) => {
+        // Tunarekodi muda kabla ya kutuma ujumbe
+        const start = performance.now();
+        
+        // Tunatuma ujumbe wa awali
+        const { key } = await sock.sendMessage(from, { text: "Testing Nyoni-XMD Speed... 🚀" }, { quoted: msg });
+        
+        // Tunapiga hesabu ya kasi (ms)
+        const speed = Math.round(performance.now() - start);
+
+        // Tunabadilisha (Edit) ujumbe ule uonyeshe speed halisi
         await sock.sendMessage(from, { 
-            image: { url: global.botSettings.menuImage }, 
-            caption: `🚀 *NYONI-XMD PING:* ${Date.now() - msg.messageTimestamp * 1000}ms` 
-        }, { quoted: msg });
+            text: `*🚀 NYONI-XMD SPEED*\n\n┃ ✧ *Latency:* ${speed} ms\n┃ ✧ *Status:* Online\n╰──────────┈`,
+            edit: key 
+        });
     }
 };
