@@ -4,7 +4,8 @@ const {
     DisconnectReason,
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion,
-    downloadContentFromMessage
+    downloadContentFromMessage,
+    getAggregateVotesInPollMessage
 } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require("path");
@@ -17,56 +18,35 @@ const port = process.env.PORT || 10000;
 let sock;
 const prefix = ".";
 
-// --- 1. GLOBAL SETTINGS ---
+// --- GLOBAL SETTINGS ---
 global.botSettings = {
-    publicMode: true,    // true = Public, false = Private
+    publicMode: true,
     alwaysOnline: true,
     autoType: true,
     autoReact: true,
-    autoStatus: true,
-    chatbot: true,
-    myUrl: "https://nyoni-md-free.onrender.com" // Link yako ya Render
+    autoStatus: true,       // Inasoma status
+    autoStatusReact: true,  // Inajibu status kwa Emoji
+    statusEmoji: "🫡",      // Emoji ya kuweka kwenye Status
+    myUrl: "https://nyoni-md-free.onrender.com"
 };
 
-// --- 2. PAIRING & KEEP-ALIVE SERVER ---
 app.use(express.static(path.join(__dirname, '.')));
-
-app.get('/', (req, res) => {
-    res.send("NYONI-XMD STATUS: RUNNING ✅");
-});
+app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
 
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).send("Please provide your number! Example: /code?number=255xxxxxxxxx");
+    if (!num) return res.status(400).send("Provide number! Example: /code?number=255xxxxxxxxx");
     num = num.replace(/[^0-9]/g, '');
     try {
-        if (!sock) return res.status(500).send("Bot engine starting... Refresh in 10s");
+        if (!sock) return res.status(500).send("Bot starting...");
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
-    } catch (err) {
-        res.status(500).send("WhatsApp connection error. Try again.");
-    }
+    } catch (err) { res.status(500).send("WhatsApp Error."); }
 });
 
 app.listen(port, () => console.log(`Server live on port ${port}`));
 
-// --- 3. PLUGIN LOADER ---
-const commands = new Map();
-function loadPlugins() {
-    const pluginsPath = path.join(__dirname, 'plugins');
-    if (!fs.existsSync(pluginsPath)) fs.mkdirSync(pluginsPath);
-    const files = fs.readdirSync(pluginsPath).filter(f => f.endsWith('.js'));
-    for (const file of files) {
-        try {
-            const plugin = require(`./plugins/${file}`);
-            if (plugin.name) commands.set(plugin.name, plugin);
-        } catch (e) { console.log(`Error loading ${file}`); }
-    }
-}
-
-// --- 4. START NYONI-XMD ENGINE ---
 async function startNyoni() {
-    // Inatumia folder la 'session' ambalo lipo kwenye GitHub yako
     const { state, saveCreds } = await useMultiFileAuthState('./session');
     const { version } = await fetchLatestBaileysVersion();
     
@@ -81,85 +61,79 @@ async function startNyoni() {
         browser: ["Ubuntu", "Chrome", "20.0.04"] 
     });
 
-    loadPlugins();
     sock.ev.on('creds.update', saveCreds);
 
-    // --- RECONNECT LOGIC ---
-    sock.ev.on('connection.update', async (update) => {
+    // --- CONNECTION UPDATE (Isizime) ---
+    sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             if (reason !== DisconnectReason.loggedOut) {
-                console.log("Connection lost. Reconnecting in 5 seconds...");
+                console.log("Connection lost. Restarting...");
                 setTimeout(() => startNyoni(), 5000);
-            } else {
-                console.log("Logged out! Please delete session folder and re-pair.");
             }
         } else if (connection === 'open') {
-            console.log('✅ NYONI-XMD IS CONNECTED AND RESPONDING!');
+            console.log('✅ NYONI-XMD IS LIVE!');
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-        try {
-            const msg = m.messages[0];
-            if (!msg.message || msg.key.remoteJid === 'status@broadcast') {
-                if (msg.key.remoteJid === 'status@broadcast' && global.botSettings.autoStatus) {
-                    await sock.readMessages([msg.key]);
-                }
-                return;
+        const msg = m.messages[0];
+        if (!msg.message) return;
+
+        const from = msg.key.remoteJid;
+        const isOwner = msg.key.fromMe;
+        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+
+        // --- AUTO STATUS VIEW & REACT ---
+        if (from === 'status@broadcast') {
+            if (global.botSettings.autoStatus) {
+                await sock.readMessages([msg.key]);
+                console.log(`Umesoma status ya: ${msg.pushName}`);
             }
-
-            const from = msg.key.remoteJid;
-            const isOwner = msg.key.fromMe;
-            const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-            const isCmd = body.startsWith(prefix);
-
-            if (!global.botSettings.publicMode && !isOwner) return;
-
-            // AUTOMATION
-            if (global.botSettings.alwaysOnline) await sock.sendPresenceUpdate('available', from);
-            if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
-
-            // --- BUILT-IN COMMANDS ---
-            if (isOwner && body === '.mode public') {
-                global.botSettings.publicMode = true;
-                return sock.sendMessage(from, { text: "✅ *Mode:* PUBLIC" });
+            if (global.botSettings.autoStatusReact) {
+                await sock.sendMessage(from, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
             }
-            if (isOwner && body === '.mode self') {
-                global.botSettings.publicMode = false;
-                return sock.sendMessage(from, { text: "🔒 *Mode:* SELF (Private)" });
-            }
+            return;
+        }
 
-            if (isOwner && body === '.setpp') {
-                const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-                if (quoted?.imageMessage) {
+        if (!global.botSettings.publicMode && !isOwner) return;
+
+        // --- COMMANDS ---
+        // Profile Picture FIX
+        if (isOwner && body.startsWith(prefix + 'setpp')) {
+            const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (quoted?.imageMessage) {
+                try {
                     const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
                     let buffer = Buffer.from([]);
                     for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+                    
                     await sock.updateProfilePicture(sock.user.id, buffer);
-                    return sock.sendMessage(from, { text: "✅ *Profile picture updated!*" });
+                    return sock.sendMessage(from, { text: "✅ *Profile Picture Updated Successfully!*" });
+                } catch (e) {
+                    return sock.sendMessage(from, { text: "❌ *Failed to update PP. Try another image.*" });
                 }
+            } else {
+                return sock.sendMessage(from, { text: "❌ *Reply to an image with .setpp*" });
             }
+        }
 
-            // --- PLUGIN HANDLER ---
-            if (!isCmd) return;
-            const args = body.slice(prefix.length).trim().split(/ +/);
-            const cmdName = args.shift().toLowerCase();
-            const plugin = commands.get(cmdName);
-            if (plugin) {
-                await plugin.execute(sock, from, msg, args, commands);
-            }
-        } catch (err) {
-            console.error("Error in messages.upsert:", err);
+        // Mode commands
+        if (isOwner && body === '.mode public') {
+            global.botSettings.publicMode = true;
+            return sock.sendMessage(from, { text: "✅ *Public Mode ON*" });
+        }
+        if (isOwner && body === '.mode self') {
+            global.botSettings.publicMode = false;
+            return sock.sendMessage(from, { text: "🔒 *Private Mode ON*" });
         }
     });
 }
 
-// --- 5. KEEP-ALIVE PING ---
+// Keep-alive kuzuia Render isizime
 setInterval(() => {
     axios.get(global.botSettings.myUrl).catch(() => {});
-    console.log("Keep-alive ping sent.");
 }, 5 * 60 * 1000);
 
 startNyoni();
