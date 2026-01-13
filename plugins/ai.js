@@ -2,42 +2,53 @@ const axios = require("axios");
 
 module.exports = {
     name: "ai",
-    category: "AI",
-    execute: async (sock, from, msg, args) => {
-        const text = args.join(" ");
-        
-        // Check if the user provided a question
-        if (!text) {
-            return await sock.sendMessage(from, { 
-                text: `*Hello! I am Nyoni-XMD AI.* 🤖\n\n*Usage:* ${global.prefix}ai What is the capital of Tanzania?` 
-            }, { quoted: msg });
+    category: "TOOLS",
+    desc: "Ask the AI any question",
+    async execute(sock, from, msg, args) {
+        // 1. Get the question from user input or quoted text
+        let query = args.join(" ");
+        if (!query && msg.message.extendedTextMessage?.contextInfo?.quotedMessage) {
+            const quoted = msg.message.extendedTextMessage.contextInfo.quotedMessage;
+            query = quoted.conversation || quoted.extendedTextMessage?.text;
         }
 
-        // Add a reaction to show the AI is thinking
-        await sock.sendMessage(from, { react: { text: "🧠", key: msg.key } });
+        if (!query) {
+            return sock.sendMessage(from, { text: "Usage: .ai [your question]\nExample: .ai how to cook rice?" });
+        }
+
+        // Send a "thinking" reaction or message
+        await sock.sendMessage(from, { react: { text: "🤖", key: msg.key } });
 
         try {
-            // Using a reliable free AI API (Llama/GPT-3 logic)
-            const response = await axios.get(`https://api.giftedtech.my.id/api/ai/gpt4?apikey=gifted&q=${encodeURIComponent(text)}`);
+            // 2. Fetch response from a free AI API
+            // Using a stable endpoint for Nyoni-XMD
+            const response = await axios.get(`https://api.simsimi.vn/v2/simsimi?text=${encodeURIComponent(query)}&lc=en`);
             
-            const aiResult = response.data.result;
-
-            const aiResponse = `*╭┈〔 🤖 NYONI-AI 〕┈─*
-┃
-${aiResult}
-┃
-╰──────────┈`;
-
-            await sock.sendMessage(from, { text: aiResponse }, { quoted: msg });
+            // Note: If the above API is busy, you can use: https://widipe.com/prompt/gpt?prompt=${query}
             
-            // Final reaction
-            await sock.sendMessage(from, { react: { text: "✅", key: msg.key } });
+            const aiResponse = response.data.message || "I'm sorry, I couldn't process that request.";
 
-        } catch (e) {
-            console.error("AI Command Error:", e);
+            // 3. Send the AI response
+            let resultText = `✨ *NYONI-XMD AI ASSISTANT*\n\n`;
+            resultText += `${aiResponse}\n\n`;
+            resultText += `_Powered by Nyoni-XMD Engine_`;
+
             await sock.sendMessage(from, { 
-                text: "❌ *AI Server is busy. Please try again later.*" 
+                text: resultText,
+                contextInfo: {
+                    externalAdReply: {
+                        title: "ARTIFICIAL INTELLIGENCE",
+                        body: "Ask me anything",
+                        thumbnailUrl: "https://files.catbox.moe/t4ts87.jpeg",
+                        mediaType: 1,
+                        renderLargerThumbnail: false
+                    }
+                }
             }, { quoted: msg });
+
+        } catch (error) {
+            console.error("AI Error:", error);
+            await sock.sendMessage(from, { text: "❌ AI server is currently overloaded. Please try again in a moment." });
         }
     }
 };
