@@ -39,8 +39,12 @@ function loadPlugins() {
     plugins.clear();
     for (const file of files) {
         try {
+            // Futa cache ili kuwezesha hot-reload ukibadilisha file
+            delete require.cache[require.resolve(`./plugins/${file}`)];
             const command = require(`./plugins/${file}`);
-            plugins.set(command.name, command);
+            if (command.name) {
+                plugins.set(command.name, command);
+            }
         } catch (e) {
             console.error(`Error loading plugin ${file}:`, e);
         }
@@ -48,8 +52,27 @@ function loadPlugins() {
     console.log(`✅ Loaded ${plugins.size} plugins!`);
 }
 
+// --- EXPRESS ROUTES ---
 app.use(express.static(path.join(__dirname, '.')));
-app.get('/', (res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
+app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
+
+app.get('/code', async (req, res) => {
+    let num = req.query.number;
+    if (!num) return res.status(400).send("Weka namba! Mfano: /code?number=255xxxxxxxxx");
+    num = num.replace(/[^0-9]/g, '');
+    try {
+        if (!sock) {
+            return res.status(500).json({ error: "Bot bado inawaka, jaribu tena baada ya sekunde 10." });
+        }
+        const code = await sock.requestPairingCode(num);
+        res.status(200).json({ code: code });
+    } catch (err) { 
+        console.error(err);
+        res.status(500).json({ error: "WhatsApp Error au Namba imekosewa." }); 
+    }
+});
+
+app.listen(port, () => console.log(`Server live on port ${port}`));
 
 async function startNyoni() {
     loadPlugins();
@@ -64,7 +87,8 @@ async function startNyoni() {
         },
         printQRInTerminal: false,
         logger: pino({ level: "silent" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        markOnlineOnConnect: true
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -72,32 +96,37 @@ async function startNyoni() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log("Connection lost. Restarting...");
                 setTimeout(() => startNyoni(), 5000);
             }
         } else if (connection === 'open') {
             console.log('✅ NYONI-XMD IS LIVE!');
             const ownerJid = jidNormalizedUser(sock.user.id);
-            await sock.sendMessage(ownerJid, { text: "🚀 *NYONI-XMD IMEUNGANISHWA!*" });
+            await sock.sendMessage(ownerJid, { 
+                text: "🚀 *NYONI-XMD IMEUNGANISHWA!*\n\nAuto-Status na Plugins ziko tayari." 
+            });
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message || msg.key.remoteJid === 'status@broadcast') {
-            // Auto Status Logic
-            if (msg.key.remoteJid === 'status@broadcast' && global.botSettings.autoStatus) {
-                await sock.readMessages([msg.key]);
-                if (global.botSettings.autoStatusReact) {
-                    await sock.sendMessage(msg.key.remoteJid, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
-                }
+        if (!msg.message) return;
+
+        const from = msg.key.remoteJid;
+        
+        // --- AUTO STATUS VIEW/REACT ---
+        if (from === 'status@broadcast') {
+            if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
+            if (global.botSettings.autoStatusReact) {
+                await sock.sendMessage(from, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
             }
             return;
         }
 
-        const from = msg.key.remoteJid;
         const isOwner = msg.key.fromMe || from.split('@')[0] === sock.user.id.split(':')[0];
-        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "").trim();
         const isCmd = body.startsWith(prefix);
         const commandName = isCmd ? body.slice(prefix.length).trim().split(' ')[0].toLowerCase() : "";
         const args = body.trim().split(/ +/).slice(1);
@@ -105,56 +134,51 @@ async function startNyoni() {
         if (isCmd) {
             if (!global.botSettings.publicMode && !isOwner) return;
 
-            // 1. Auto React
+            // 1. Auto React & Typing
             await sock.sendMessage(from, { react: { text: "⚡", key: msg.key } });
-
-            // 2. Auto Typing
             if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
 
-            // 3. Handle Automatic Menu
+            // 2. AUTOMATIC MENU
             if (commandName === 'menu') {
-                // Panga commands kwa makundi (Categories)
                 const categories = {};
                 plugins.forEach(p => {
-                    const cat = p.category || "OTHER";
+                    const cat = p.category || "MAIN";
                     if (!categories[cat]) categories[cat] = [];
                     categories[cat].push(p.name);
                 });
 
-                let menuMsg = `🚀 *NYONI-XMD DASHBOARD*\n\n`;
+                let menuText = `*NYONI-XMD AUTOMATIC MENU*\n\n`;
                 for (const [cat, cmds] of Object.entries(categories)) {
-                    menuMsg += `*╭┈〔 🏠 ${cat.toUpperCase()} 〕┈─*\n`;
+                    menuText += `*╭┈〔 🏠 ${cat.toUpperCase()} 〕┈─*\n`;
                     cmds.forEach(cmd => {
-                        menuMsg += `┃ ✧ ${prefix}${cmd}\n`;
+                        menuText += `┃ ✧ ${prefix}${cmd}\n`;
                     });
-                    menuMsg += `╰──────────┈\n\n`;
+                    menuText += `╰──────────┈\n\n`;
                 }
 
-                return await sock.sendMessage(from, {
-                    image: { url: thumbUrl },
-                    caption: menuMsg
+                return await sock.sendMessage(from, { 
+                    image: { url: thumbUrl }, 
+                    caption: menuText 
                 }, { quoted: msg });
             }
 
-            // 4. Handle Plugin Commands
-            const cmd = plugins.get(commandName);
-            if (cmd) {
+            // 3. PLUGIN HANDLER
+            const plugin = plugins.get(commandName);
+            if (plugin) {
                 try {
-                    // Kila command inatuma na picha kama thumbnail ukitaka
-                    // (Hapa inaita execute function ya plugin yako)
-                    await cmd.execute(sock, from, msg, args);
-                } catch (e) {
-                    console.error(e);
+                    await plugin.execute(sock, from, msg, args);
+                } catch (err) {
+                    console.error(err);
+                    await sock.sendMessage(from, { text: "❌ Error executing command." });
                 }
             }
         }
     });
 }
 
-// Keep-alive
+// Keep-alive kuzuia Render isilale
 setInterval(() => {
     axios.get(global.botSettings.myUrl).catch(() => {});
 }, 2 * 60 * 1000);
 
-app.listen(port, () => console.log(`Server live on port ${port}`));
 startNyoni();
