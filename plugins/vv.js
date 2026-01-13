@@ -1,49 +1,56 @@
 const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
 
 module.exports = {
-    name: "vv",
+    name: "getstatus",
+    alias: ["get", "steal", "save"],
     category: "TOOLS",
-    desc: "Download/Resend View Once messages",
+    description: "Download WhatsApp Status (Image/Video)",
     async execute(sock, from, msg, args) {
-        // 1. Check if the user replied to a message
-        const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quoted) {
-            return sock.sendMessage(from, { text: "Please reply to a *View Once* message (image/video)." });
-        }
-
-        // 2. Identify if it is a View Once message
-        const type = Object.keys(quoted)[0];
-        const viewOnce = quoted.viewOnceMessageV2?.message || quoted.viewOnceMessage?.message;
-        
-        if (!viewOnce) {
-            return sock.sendMessage(from, { text: "This is not a View Once message." });
-        }
-
-        // 3. Get actual content (image or video)
-        const mediaType = Object.keys(viewOnce)[0]; // imageMessage or videoMessage
-        const media = viewOnce[mediaType];
-
         try {
-            // 4. Download the media
-            const stream = await downloadContentFromMessage(media, mediaType === 'imageMessage' ? 'image' : 'video');
+            // 1. Check if the user replied to a status
+            const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+            
+            if (!quoted) {
+                return sock.sendMessage(from, { text: "❌ Please reply to a *Status* with .get to download it." }, { quoted: msg });
+            }
+
+            // 2. Identify the media type (Image or Video)
+            const mtype = Object.keys(quoted)[0];
+
+            if (!["imageMessage", "videoMessage"].includes(mtype)) {
+                return sock.sendMessage(from, {
+                    text: "❌ This command only works for Image or Video statuses."
+                }, { quoted: msg });
+            }
+
+            // React to show the bot is processing
+            await sock.sendMessage(from, { react: { text: "📥", key: msg.key } });
+
+            // 3. Download the status media
+            const media = quoted[mtype];
+            const stream = await downloadContentFromMessage(media, mtype.replace('Message', ''));
             let buffer = Buffer.from([]);
             for await (const chunk of stream) {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 5. Resend it as a normal message
-            const caption = media.caption || "View Once Downloaded by Nyoni-XMD";
-            
-            if (mediaType === 'imageMessage') {
-                await sock.sendMessage(from, { image: buffer, caption: caption }, { quoted: msg });
-            } else if (mediaType === 'videoMessage') {
-                await sock.sendMessage(from, { video: buffer, caption: caption }, { quoted: msg });
+            // 4. Send the media back to the user
+            let messageContent = {};
+            const caption = media.caption || "✅ *Status Downloaded by Nyoni-XMD*";
+
+            if (mtype === "imageMessage") {
+                messageContent = { image: buffer, caption: caption };
+            } else if (mtype === "videoMessage") {
+                messageContent = { video: buffer, caption: caption };
             }
 
+            await sock.sendMessage(from, messageContent, { quoted: msg });
+
         } catch (error) {
-            console.error(error);
-            await sock.sendMessage(from, { text: "❌ Failed to download View Once media." });
+            console.error("Status Download Error:", error);
+            await sock.sendMessage(from, {
+                text: "❌ Error: Could not download the status."
+            }, { quoted: msg });
         }
     }
 };
