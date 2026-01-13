@@ -17,22 +17,22 @@ const port = process.env.PORT || 10000;
 let sock;
 const prefix = ".";
 
-// --- 1. SETTINGS ZA GLOBAL ---
+// --- 1. GLOBAL SETTINGS ---
 global.botSettings = {
-    publicMode: true,    // true = Kila mtu, false = Owner tu
-    alwaysOnline: true,  // Bot ionekane online
-    autoType: true,      // Typing...
-    autoReact: true,     // React 🤖
-    autoStatus: true,    // View Status kiotomatiki
-    chatbot: true,       // Chatbot ya Mambo/Hello
-    myUrl: "https://nyoni-md-free.onrender.com" // WEKA LINK YAKO YA RENDER HAPA
+    publicMode: true,    // true = Public, false = Private
+    alwaysOnline: true,
+    autoType: true,
+    autoReact: true,
+    autoStatus: true,
+    chatbot: true,
+    myUrl: "https://nyoni-md-free.onrender.com" // Link yako ya Render
 };
 
-// --- 2. SERVER YA PAIRING NA KEEP-ALIVE ---
+// --- 2. PAIRING & KEEP-ALIVE SERVER ---
 app.use(express.static(path.join(__dirname, '.')));
 
 app.get('/', (req, res) => {
-    res.send("NYONI-XMD STATUS: ACTIVE 🚀");
+    res.send("NYONI-XMD STATUS: RUNNING ✅");
 });
 
 app.get('/code', async (req, res) => {
@@ -40,12 +40,11 @@ app.get('/code', async (req, res) => {
     if (!num) return res.status(400).send("Please provide your number! Example: /code?number=255xxxxxxxxx");
     num = num.replace(/[^0-9]/g, '');
     try {
-        if (!sock) return res.status(500).send("Bot engine is starting... Refresh in 10 seconds.");
+        if (!sock) return res.status(500).send("Bot engine starting... Refresh in 10s");
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
     } catch (err) {
-        console.log("Pairing Error:", err);
-        res.status(500).send("WhatsApp connection failed. Try again after 1 minute.");
+        res.status(500).send("WhatsApp connection error. Try again.");
     }
 });
 
@@ -67,10 +66,8 @@ function loadPlugins() {
 
 // --- 4. START NYONI-XMD ENGINE ---
 async function startNyoni() {
-    // Hakikisha folder la 'session' lipo
-    if (!fs.existsSync('./session')) {
-        fs.mkdirSync('./session');
-    }
+    // Hakikisha folder la session lipo ili lisifutike kirahisi
+    if (!fs.existsSync('./session')) fs.mkdirSync('./session');
 
     const { state, saveCreds } = await useMultiFileAuthState('./session');
     const { version } = await fetchLatestBaileysVersion();
@@ -87,23 +84,26 @@ async function startNyoni() {
     });
 
     loadPlugins();
+
+    // Inahifadhi login zako kila mara
     sock.ev.on('creds.update', saveCreds);
 
-    // --- MFUMO WA KURECONNECT (Bot isizime) ---
-    sock.ev.on('connection.update', (update) => {
+    // --- RECONNECT LOGIC (MUHIMU SANA) ---
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             console.log("Connection closed. Reason:", reason);
             
+            // Kama siyo log out, iwashe tena baada ya sekunde 5
             if (reason !== DisconnectReason.loggedOut) {
-                console.log("Attempting to reconnect in 5 seconds...");
+                console.log("Reconnecting in 5 seconds...");
                 setTimeout(() => startNyoni(), 5000);
             } else {
-                console.log("Logged out! Delete session folder and pair again.");
+                console.log("Logged out! Please delete session folder and re-pair.");
             }
         } else if (connection === 'open') {
-            console.log('✅ NYONI-XMD IS CONNECTED AND LIVE!');
+            console.log('✅ NYONI-XMD IS CONNECTED!');
         }
     });
 
@@ -126,21 +126,20 @@ async function startNyoni() {
         // AUTOMATION
         if (global.botSettings.alwaysOnline) await sock.sendPresenceUpdate('available', from);
         if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
-        if (global.botSettings.autoReact) await sock.sendMessage(from, { react: { text: "🤖", key: msg.key } });
 
-        // --- COMMANDS ZA KIINGEREZA ---
+        // --- COMMANDS ZA ENGLISH ---
         
-        // 1. .mode public / .mode self
+        // Mode switch
         if (isOwner && body === '.mode public') {
             global.botSettings.publicMode = true;
-            return sock.sendMessage(from, { text: "✅ *Bot mode set to PUBLIC.* Everyone can use it now." });
+            return sock.sendMessage(from, { text: "✅ *Mode:* PUBLIC" });
         }
         if (isOwner && body === '.mode self') {
             global.botSettings.publicMode = false;
-            return sock.sendMessage(from, { text: "🔒 *Bot mode set to PRIVATE (Self).* Only the owner can use it." });
+            return sock.sendMessage(from, { text: "🔒 *Mode:* SELF (Private)" });
         }
 
-        // 2. .setpp (Kuweka Picha)
+        // Profile Picture (.setpp)
         if (isOwner && body === '.setpp') {
             const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (quoted?.imageMessage) {
@@ -150,15 +149,7 @@ async function startNyoni() {
                 await sock.updateProfilePicture(sock.user.id, buffer);
                 return sock.sendMessage(from, { text: "✅ *Profile picture updated successfully!*" });
             } else {
-                return sock.sendMessage(from, { text: "❌ *Please reply to an image with .setpp to update the profile picture.*" });
-            }
-        }
-
-        // --- CHATBOT ---
-        if (!isCmd && global.botSettings.chatbot && body.length > 0) {
-            const input = body.toLowerCase();
-            if (input.includes("hello") || input.includes("mambo")) {
-                return sock.sendMessage(from, { text: "Hello! I am *NYONI-XMD*, how can I help you today?" });
+                return sock.sendMessage(from, { text: "❌ *Please reply to an image with .setpp*" });
             }
         }
 
@@ -174,10 +165,10 @@ async function startNyoni() {
     });
 }
 
-// --- 5. KEEP-ALIVE (Kuzuia Render isilale) ---
+// --- 5. KEEP-ALIVE PING ---
 setInterval(() => {
     axios.get(global.botSettings.myUrl).catch(() => {});
-    console.log("Ping sent to keep bot alive!");
-}, 5 * 60 * 1000); // Inatuma kila dakika 5
+    console.log("Keep-alive: Ping sent to Render.");
+}, 5 * 60 * 1000); // Kila dakika 5
 
 startNyoni();
