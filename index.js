@@ -4,7 +4,8 @@ const {
     DisconnectReason,
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion,
-    jidNormalizedUser
+    jidNormalizedUser,
+    downloadMediaMessage
 } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require("path");
@@ -25,8 +26,10 @@ global.botSettings = {
     autoStatus: true,
     autoStatusReact: true,
     statusEmoji: "🫡",
-    antiSticker: true, // Sehemu mpya ya Anti-Sticker
-    myUrl: "https://nyoni-md-free.onrender.com" // Update with your Render URL
+    myUrl: "https://nyoni-md-free.onrender.com", // Update with your Render URL
+    antiSticker: true, // Anti-sticker feature
+    allowedStickerPacks: ["nyoni", "bot"], // Allowed sticker pack names
+    maxStickerSize: 10000 // Maximum sticker size in KB
 };
 
 // --- PLUGIN LOADER ---
@@ -43,6 +46,76 @@ function loadPlugins() {
             if (command.name) plugins.set(command.name, command);
         } catch (e) { console.error(`Error loading ${file}:`, e); }
     }
+}
+
+// --- ANTISTICKER FUNCTION ---
+async function handleAntiSticker(sock, msg, from) {
+    if (!global.botSettings.antiSticker) return false;
+    
+    const sticker = msg.message?.stickerMessage;
+    if (!sticker) return false;
+    
+    const sender = msg.key.participant || msg.key.remoteJid;
+    const isOwner = msg.key.fromMe || sender.split('@')[0] === sock.user.id.split(':')[0];
+    const isGroup = from.endsWith('@g.us');
+    
+    // Allow owner to send stickers
+    if (isOwner) return false;
+    
+    const stickerPack = sticker.stickerSentTs?.toString() || "unknown";
+    const stickerSize = sticker.fileLength || 0;
+    
+    let shouldDelete = false;
+    let reason = "";
+    
+    // Check sticker size
+    if (stickerSize > global.botSettings.maxStickerSize * 1024) {
+        shouldDelete = true;
+        reason = `Sticker too large (${Math.round(stickerSize/1024)}KB)`;
+    }
+    
+    // Check if sticker pack is allowed
+    const isAllowed = global.botSettings.allowedStickerPacks.some(pack => 
+        stickerPack.toLowerCase().includes(pack.toLowerCase())
+    );
+    
+    if (!isAllowed) {
+        shouldDelete = true;
+        reason = `Sticker from unauthorized pack: ${stickerPack}`;
+    }
+    
+    // Delete sticker if needed
+    if (shouldDelete) {
+        try {
+            // Delete the sticker
+            await sock.sendMessage(from, {
+                delete: msg.key
+            });
+            
+            // Notify in group or privately
+            const warningMsg = `⚠️ *STICKER REMOVED*\nReason: ${reason}\nSender: @${sender.split('@')[0]}`;
+            
+            if (isGroup) {
+                await sock.sendMessage(from, {
+                    text: warningMsg,
+                    mentions: [sender]
+                });
+            } else {
+                await sock.sendMessage(from, {
+                    text: `⚠️ Sticker removed. ${reason}`
+                });
+            }
+            
+            // Log the action
+            console.log(`Anti-sticker: Deleted sticker from ${sender} - ${reason}`);
+            
+            return true;
+        } catch (error) {
+            console.error("Anti-sticker error:", error);
+        }
+    }
+    
+    return false;
 }
 
 app.get('/', (req, res) => res.send("NYONI-XMD ACTIVE 🚀"));
@@ -83,14 +156,17 @@ async function startNyoni() {
             }
         } else if (connection === 'open') {
             const ownerJid = jidNormalizedUser(sock.user.id);
-            await sock.sendMessage(ownerJid, { text: "🚀 *NYONI-XMD CONNECTED!*" });
+            await sock.sendMessage(ownerJid, { text: "🚀 *NYONI-XMD CONNECTED!*\n\nAnti-Sticker: " + (global.botSettings.antiSticker ? "✅ ON" : "❌ OFF") });
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message || msg.key.remoteJid === 'status@broadcast') {
-            if (msg.key.remoteJid === 'status@broadcast' && global.botSettings.autoStatus) {
+        const from = msg.key.remoteJid;
+        
+        // Handle status updates
+        if (msg.key.remoteJid === 'status@broadcast') {
+            if (global.botSettings.autoStatus) {
                 await sock.readMessages([msg.key]);
                 if (global.botSettings.autoStatusReact) {
                     await sock.sendMessage(msg.key.remoteJid, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
@@ -99,16 +175,16 @@ async function startNyoni() {
             return;
         }
 
-        const from = msg.key.remoteJid;
-        const isOwner = msg.key.fromMe || from.split('@')[0] === sock.user.id.split(':')[0];
-        const isSticker = msg.message.stickerMessage;
+        if (!msg.message) return;
 
-        // --- SEHEMU YA ANTISTICKER ---
-        if (isSticker && global.botSettings.antiSticker && !isOwner) {
-            await sock.sendMessage(from, { delete: msg.key });
-            return; // Zuia bot kuendelea kuchakata sticker
+        // Check for stickers first
+        const hasSticker = msg.message.stickerMessage;
+        if (hasSticker && global.botSettings.antiSticker) {
+            const wasDeleted = await handleAntiSticker(sock, msg, from);
+            if (wasDeleted) return; // Skip further processing if sticker was deleted
         }
 
+        const isOwner = msg.key.fromMe || from.split('@')[0] === sock.user.id.split(':')[0];
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "").trim();
         
         if (!body.startsWith(global.prefix)) return;
@@ -132,13 +208,53 @@ async function startNyoni() {
             });
 
             let menuText = `🚀 *NYONI-XMD DASHBOARD*\n\n`;
+            menuText += `• Prefix: ${global.prefix}\n`;
+            menuText += `• Mode: ${global.botSettings.publicMode ? "Public" : "Private"}\n`;
+            menuText += `• Anti-Sticker: ${global.botSettings.antiSticker ? "✅ ON" : "❌ OFF"}\n\n`;
+            
             for (const [cat, cmds] of Object.entries(categories)) {
                 menuText += `*╭┈〔 🏠 ${cat.toUpperCase()} 〕┈─*\n`;
                 cmds.forEach(cmd => { menuText += `┃ ✧ ${global.prefix}${cmd}\n`; });
                 menuText += `╰──────────┈\n\n`;
             }
 
+            menuText += `\n⚙️ *SETTINGS*\n`;
+            menuText += `${global.prefix}antisticker on/off\n`;
+            menuText += `${global.prefix}public on/off\n`;
+
             return await sock.sendMessage(from, { image: { url: global.thumbUrl }, caption: menuText }, { quoted: msg });
+        }
+
+        // --- ANTISTICKER COMMAND ---
+        if (commandName === 'antisticker') {
+            if (!isOwner) return;
+            const action = args[0]?.toLowerCase();
+            if (action === 'on') {
+                global.botSettings.antiSticker = true;
+                await sock.sendMessage(from, { text: "✅ Anti-sticker feature ENABLED" }, { quoted: msg });
+            } else if (action === 'off') {
+                global.botSettings.antiSticker = false;
+                await sock.sendMessage(from, { text: "❌ Anti-sticker feature DISABLED" }, { quoted: msg });
+            } else {
+                await sock.sendMessage(from, { text: `Anti-sticker: ${global.botSettings.antiSticker ? "✅ ON" : "❌ OFF"}` }, { quoted: msg });
+            }
+            return;
+        }
+
+        // --- PUBLIC MODE COMMAND ---
+        if (commandName === 'public') {
+            if (!isOwner) return;
+            const action = args[0]?.toLowerCase();
+            if (action === 'on') {
+                global.botSettings.publicMode = true;
+                await sock.sendMessage(from, { text: "✅ Bot is now PUBLIC" }, { quoted: msg });
+            } else if (action === 'off') {
+                global.botSettings.publicMode = false;
+                await sock.sendMessage(from, { text: "🔒 Bot is now PRIVATE" }, { quoted: msg });
+            } else {
+                await sock.sendMessage(from, { text: `Public mode: ${global.botSettings.publicMode ? "✅ ON" : "🔒 OFF"}` }, { quoted: msg });
+            }
+            return;
         }
 
         const plugin = plugins.get(commandName);
