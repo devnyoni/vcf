@@ -25,7 +25,7 @@ global.botSettings = {
     autoType: true,
     autoStatus: true,
     autoStatusReact: true,
-    statusEmoji: "🫡,🥲,🥰,🔥,🙊,🙉👍🏻,👎🏻,",
+    statusEmoji: "🫡,🥲,🥰,🔥,🙊,🙉👍🏻,👎🏻,🤲🏻",
     myUrl: "https://nyoni-md-free.onrender.com"
 };
 
