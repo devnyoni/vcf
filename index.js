@@ -18,25 +18,33 @@ const prefix = ".";
 
 // --- 1. GLOBAL SETTINGS ---
 global.botSettings = {
-    publicMode: true,    // Kweli = Kila mtu, Si kweli = Wewe tu
-    alwaysOnline: true,  // Bot ionekane online kila wakati
-    autoType: true,      // "typing..." kila ujumbe ukiingia
-    autoRecord: false,   // "recording..." (Zima kwa default)
-    autoReact: true,     // React ya kiotomatiki 🤖
-    autoStatus: true,    // Kuangalia status za watu kiotomatiki
-    chatbot: true        // Chatbot iko hewani
+    publicMode: true,    // true = Everyone, false = Owner only
+    alwaysOnline: true,
+    autoType: true,
+    autoReact: true,
+    autoStatus: true,
+    chatbot: true
 };
 
-// --- 2. PAIRING SERVER (Kwa ajili ya Render) ---
+// --- 2. IMPROVED PAIRING SERVER (Uhakika 100%) ---
 app.use(express.static(path.join(__dirname, '.')));
+
 app.get('/code', async (req, res) => {
-    let num = req.query.number?.replace(/[^0-9]/g, '');
-    if (!num) return res.status(400).json({ error: "Number required" });
+    let num = req.query.number;
+    if (!num) return res.status(400).send("Please provide your number. Example: /code?number=255xxxxxxxxx");
+    
+    num = num.replace(/[^0-9]/g, ''); // Inafuta alama zisizohitajika
+
     try {
+        if (!sock) return res.status(500).send("Bot is not ready yet. Please refresh in 10 seconds.");
         const code = await sock.requestPairingCode(num);
-        res.status(200).json({ code });
-    } catch (err) { res.status(500).json({ error: "Error" }); }
+        res.status(200).json({ code: code });
+    } catch (err) {
+        console.log("Pairing Error:", err);
+        res.status(500).send("WhatsApp connection failed. Try again after 1 minute.");
+    }
 });
+
 app.listen(port, () => console.log(`Server live on port ${port}`));
 
 // --- 3. PLUGIN LOADER ---
@@ -66,22 +74,27 @@ async function startNyoni() {
         },
         printQRInTerminal: false,
         logger: pino({ level: "fatal" }),
-        browser: ["Nyoni-XMD", "Chrome", "20.0.04"]
+        browser: ["Ubuntu", "Chrome", "20.0.04"] // Hii ni muhimu kwa Pairing Code
     });
 
     loadPlugins();
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (u) => {
-        if (u.connection === 'close') startNyoni();
-        if (u.connection === 'open') console.log('NYONI-XMD IS LIVE! 🚀');
+        const { connection, lastDisconnect } = u;
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) startNyoni();
+        } else if (connection === 'open') {
+            console.log('NYONI-XMD IS LIVE! 🚀');
+        }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') {
             if (msg.key.remoteJid === 'status@broadcast' && global.botSettings.autoStatus) {
-                await sock.readMessages([msg.key]); // View Status Automatically
+                await sock.readMessages([msg.key]);
             }
             return;
         }
@@ -94,38 +107,41 @@ async function startNyoni() {
         // --- PUBLIC/PRIVATE PROTECTION ---
         if (!global.botSettings.publicMode && !isOwner) return;
 
-        // --- AUTOMATION ACTIONS ---
+        // --- AUTOMATION ---
         if (global.botSettings.alwaysOnline) await sock.sendPresenceUpdate('available', from);
         if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
         if (global.botSettings.autoReact) await sock.sendMessage(from, { react: { text: "🤖", key: msg.key } });
 
-        // --- SPECIAL COMMANDS (Inside Index) ---
+        // --- ENGLISH COMMANDS (Inside Index) ---
+        
+        // Change Mode to Public or Self
         if (isOwner && body === '.mode public') {
             global.botSettings.publicMode = true;
-            return sock.sendMessage(from, { text: "✅ Mode: PUBLIC (Kila mtu anaweza kunitumia)" });
+            return sock.sendMessage(from, { text: "✅ *Bot mode set to PUBLIC.* Anyone can use me now." });
         }
         if (isOwner && body === '.mode self') {
             global.botSettings.publicMode = false;
-            return sock.sendMessage(from, { text: "🔒 Mode: SELF (Ni Boss tu anaruhusiwa)" });
+            return sock.sendMessage(from, { text: "🔒 *Bot mode set to PRIVATE.* Only the owner can use me." });
         }
 
-        // --- PROFILE PICTURE SETTER (.setpp) ---
+        // Change Profile Picture (.setpp)
         if (isOwner && body === '.setpp') {
             const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (quoted?.imageMessage) {
                 const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
                 let buffer = Buffer.from([]);
                 for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-                await sock.updateProfilePicture(sock.user.id, buffer); // Change Profile Picture
-                return sock.sendMessage(from, { text: "✅ Picha ya Bot imebadilishwa!" });
+                await sock.updateProfilePicture(sock.user.id, buffer);
+                return sock.sendMessage(from, { text: "✅ *Profile picture updated successfully!*" });
+            } else {
+                return sock.sendMessage(from, { text: "❌ *Please reply to an image with .setpp*" });
             }
         }
 
-        // --- CHATBOT LOGIC ---
+        // --- CHATBOT ---
         if (!isCmd && global.botSettings.chatbot && body.length > 0) {
             const input = body.toLowerCase();
-            if (input.includes("mambo")) return sock.sendMessage(from, { text: "Poa sana! Mimi ni Nyoni-XMD, nisaidie nini?" });
-            if (input.includes("nyoni")) return sock.sendMessage(from, { text: "Ndiyo, nipo hapa! ⚡" });
+            if (input.includes("hello") || input.includes("mambo")) return sock.sendMessage(from, { text: "Hello! I am Nyoni-XMD. How can I help you today?" });
         }
 
         // --- COMMAND HANDLER ---
