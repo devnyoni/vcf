@@ -1,5 +1,3 @@
-const yts = require('yt-search');
-const fetch = require('node-fetch');
 
 module.exports = {
     name: "play",
