@@ -20,17 +20,17 @@ const prefix = ".";
 // --- GLOBAL CONFIG ---
 global.botSettings = {
     publicMode: true,
-    autoStatus: true,       // Auto view status
-    autoStatusReact: true,  // Auto react emoji kwenye status
-    statusEmoji: "🫡",      // Emoji unayotaka
-    myUrl: "https://nyoni-md-free.onrender.com"
+    autoStatus: true,       // Inasoma status kiotomatiki
+    autoStatusReact: true,  // Inaweka emoji kwenye status
+    statusEmoji: "🫡",      // Emoji ya status
+    myUrl: "https://nyoni-md-free.onrender.com" // Link yako ya Render
 };
 
 // --- WEB SERVER ---
 app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
 app.listen(port, () => console.log(`Server running on port ${port}`));
 
-// --- PLUGIN LOADER (Fixed to Respond) ---
+// --- PLUGIN LOADER (Hurekebisha tatizo la kutorespond) ---
 const commands = new Map();
 function loadPlugins() {
     const pluginsPath = path.join(__dirname, 'plugins');
@@ -46,7 +46,7 @@ function loadPlugins() {
 }
 
 async function startNyoni() {
-    // Inasoma session kutoka folder lako la GitHub
+    // Inasoma folder la session ambalo unalo GitHub
     const { state, saveCreds } = await useMultiFileAuthState('./session');
     const { version } = await fetchLatestBaileysVersion();
     
@@ -64,14 +64,14 @@ async function startNyoni() {
     loadPlugins();
     sock.ev.on('creds.update', saveCreds);
 
-    // --- RECONNECT LOGIC (Isizime ukirestart) ---
+    // --- RECONNECT LOGIC (Inazuia bot isizime ukirestart) ---
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             if (reason !== DisconnectReason.loggedOut) {
-                console.log("Connection lost, restarting bot...");
-                setTimeout(() => startNyoni(), 5000); // Inawaka yenyewe baada ya sekunde 5
+                console.log("Connection lost, restarting...");
+                setTimeout(() => startNyoni(), 5000); // Inajiwasha yenyewe
             }
         } else if (connection === 'open') {
             console.log('✅ NYONI-XMD IS NOW RESPONDING!');
@@ -85,7 +85,7 @@ async function startNyoni() {
         const from = msg.key.remoteJid;
         const isOwner = msg.key.fromMe;
 
-        // --- AUTO VIEW & REACT STATUS ---
+        // --- AUTO STATUS (View & React) ---
         if (from === 'status@broadcast') {
             if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
             if (global.botSettings.autoStatusReact) {
@@ -96,7 +96,7 @@ async function startNyoni() {
 
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
         
-        // --- COMMAND HANDLER (Kuhakikisha inajibu) ---
+        // --- COMMAND HANDLER ---
         if (body.startsWith(prefix)) {
             const args = body.slice(prefix.length).trim().split(/ +/);
             const cmdName = args.shift().toLowerCase();
@@ -105,10 +105,10 @@ async function startNyoni() {
             if (plugin) {
                 try {
                     await plugin.execute(sock, from, msg, args);
-                } catch (e) { console.error("Plugin Error:", e); }
+                } catch (e) { console.error("Error:", e); }
             }
 
-            // --- .setpp Command FIX ---
+            // --- SET PROFILE PICTURE FIX ---
             if (isOwner && cmdName === 'setpp') {
                 const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
                 if (quoted?.imageMessage) {
@@ -116,14 +116,14 @@ async function startNyoni() {
                     let buffer = Buffer.from([]);
                     for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                     await sock.updateProfilePicture(sock.user.id, buffer);
-                    return sock.sendMessage(from, { text: "✅ *Profile Picture Updated!*" });
+                    return sock.sendMessage(from, { text: "✅ *Profile Picture Updated Successfully!*" });
                 }
             }
         }
     });
 }
 
-// --- KEEP-ALIVE (Kuzuia Render isilale) ---
+// Keep-alive kuzuia Render isilale
 setInterval(() => {
     axios.get(global.botSettings.myUrl).catch(() => {});
 }, 5 * 60 * 1000);
