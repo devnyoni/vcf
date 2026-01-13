@@ -26,7 +26,11 @@ global.botSettings = {
     autoStatus: true,
     autoStatusReact: true,
     statusEmoji: "🫡",
-    myUrl: "https://nyoni-md-free.onrender.com"
+    myUrl: "https://nyoni-md-free.onrender.com",
+    antiSticker: true,  // Setting mpya ya antisticker
+    stickerWarning: true, // Kuonya kuhusu stickers
+    stickerTimeout: 5 * 60 * 1000, // 5 dakika ya mute
+    stickerBannedGroups: [] // Array ya groups zilizoban stickers
 };
 
 // --- PLUGIN LOADER ---
@@ -52,6 +56,62 @@ function loadPlugins() {
     console.log(`✅ Loaded ${plugins.size} plugins!`);
 }
 
+// --- STICKER PROTECTION SYSTEM ---
+const stickerViolations = new Map(); // userJid: {count, lastViolation}
+
+function checkStickerPermission(groupJid, userJid) {
+    if (!global.botSettings.antiSticker) return true;
+    if (global.botSettings.stickerBannedGroups.includes(groupJid)) return false;
+    
+    const violations = stickerViolations.get(userJid);
+    if (violations && Date.now() - violations.lastViolation < global.botSettings.stickerTimeout) {
+        return false; // User amemute
+    }
+    return true;
+}
+
+async function handleStickerViolation(sock, msg, from, senderJid) {
+    const groupMetadata = await sock.groupMetadata(from).catch(() => null);
+    const violations = stickerViolations.get(senderJid) || { count: 0, lastViolation: 0 };
+    
+    violations.count++;
+    violations.lastViolation = Date.now();
+    stickerViolations.set(senderJid, violations);
+    
+    if (global.botSettings.stickerWarning) {
+        const warnings = violations.count;
+        let action = "";
+        
+        if (warnings >= 3) {
+            // Mute user kwa muda
+            try {
+                const expiration = Date.now() + global.botSettings.stickerTimeout;
+                await sock.groupParticipantsUpdate(from, [senderJid], 'restrict');
+                action = `⏳ Muted for ${global.botSettings.stickerTimeout / (60 * 1000)} minutes`;
+            } catch (e) {
+                console.error("Failed to mute user:", e);
+            }
+        }
+        
+        const warningMsg = `⚠️ *STICKER WARNING*\n\n` +
+                          `User: @${senderJid.split('@')[0]}\n` +
+                          `Warning #${warnings}\n` +
+                          `${action}\n\n` +
+                          `_Stickers are disabled in this group._`;
+        
+        await sock.sendMessage(from, { 
+            text: warningMsg,
+            mentions: [senderJid]
+        }, { quoted: msg });
+    }
+    
+    try {
+        await sock.sendMessage(from, { delete: msg.key });
+    } catch (e) {
+        console.error("Failed to delete sticker:", e);
+    }
+}
+
 // --- EXPRESS ROUTES ---
 app.use(express.static(path.join(__dirname, '.')));
 app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
@@ -70,6 +130,15 @@ app.get('/code', async (req, res) => {
         console.error(err);
         res.status(500).json({ error: "WhatsApp Error au Namba imekosewa." }); 
     }
+});
+
+// Route mpya ya kudhibiti antisticker settings
+app.get('/antisticker', (req, res) => {
+    res.json({
+        enabled: global.botSettings.antiSticker,
+        bannedGroups: global.botSettings.stickerBannedGroups,
+        violations: Object.fromEntries(stickerViolations)
+    });
 });
 
 app.listen(port, () => console.log(`Server live on port ${port}`));
@@ -105,7 +174,9 @@ async function startNyoni() {
             console.log('✅ NYONI-XMD IS LIVE!');
             const ownerJid = jidNormalizedUser(sock.user.id);
             await sock.sendMessage(ownerJid, { 
-                text: "🚀 *NYONI-XMD IMEUNGANISHWA!*\n\nAuto-Status na Plugins ziko tayari." 
+                text: "🚀 *NYONI-XMD IMEUNGANISHWA!*\n\n" +
+                      `Anti-Sticker: ${global.botSettings.antiSticker ? '✅' : '❌'}\n` +
+                      "Plugins ziko tayari." 
             });
         }
     });
@@ -115,7 +186,18 @@ async function startNyoni() {
         if (!msg.message) return;
 
         const from = msg.key.remoteJid;
+        const isGroup = from.endsWith('@g.us');
         
+        // --- ANTI-STICKER SYSTEM ---
+        if (isGroup && msg.message.stickerMessage && global.botSettings.antiSticker) {
+            const senderJid = msg.key.participant || msg.key.remoteJid;
+            
+            if (!checkStickerPermission(from, senderJid)) {
+                await handleStickerViolation(sock, msg, from, senderJid);
+                return;
+            }
+        }
+
         // --- AUTO STATUS VIEW/REACT ---
         if (from === 'status@broadcast') {
             if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
@@ -126,7 +208,10 @@ async function startNyoni() {
         }
 
         const isOwner = msg.key.fromMe || from.split('@')[0] === sock.user.id.split(':')[0];
-        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "").trim();
+        const body = (msg.message.conversation || 
+                     msg.message.extendedTextMessage?.text || 
+                     msg.message.imageMessage?.caption || 
+                     msg.message.videoMessage?.caption || "").trim();
         const isCmd = body.startsWith(prefix);
         const commandName = isCmd ? body.slice(prefix.length).trim().split(' ')[0].toLowerCase() : "";
         const args = body.trim().split(/ +/).slice(1);
@@ -148,6 +233,10 @@ async function startNyoni() {
                 });
 
                 let menuText = `*NYONI-XMD AUTOMATIC MENU*\n\n`;
+                menuText += `⚙️ Settings:\n`;
+                menuText += `• Anti-Sticker: ${global.botSettings.antiSticker ? '✅' : '❌'}\n`;
+                menuText += `• Public Mode: ${global.botSettings.publicMode ? '✅' : '❌'}\n\n`;
+
                 for (const [cat, cmds] of Object.entries(categories)) {
                     menuText += `*╭┈〔 🏠 ${cat.toUpperCase()} 〕┈─*\n`;
                     cmds.forEach(cmd => {
@@ -163,15 +252,25 @@ async function startNyoni() {
             }
 
             // 3. PLUGIN HANDLER
-            const plugin = plugins.get(commandName);
-            if (plugin) {
-                try {
-                    await plugin.execute(sock, from, msg, args);
-                } catch (err) {
-                    console.error(err);
-                    await sock.sendMessage(from, { text: "❌ Error executing command." });
+            const plugin = plugins.forEach(cmd => {
+                const plugin = plugins.get(commandName);
+                if (plugin) {
+                    try {
+                        // Check admin for antisticker commands
+                        if (commandName === 'antisticker' && isGroup) {
+                            const metadata = await sock.groupMetadata(from);
+                            const isAdmin = metadata.participants.find(p => p.id === msg.key.participant)?.admin;
+                            if (!isAdmin && !isOwner) {
+                                return sock.sendMessage(from, { text: "❌ Command hii ni ya admins tu!" });
+                            }
+                        }
+                        plugin.execute(sock, from, msg, args);
+                    } catch (err) {
+                        console.error(err);
+                        sock.sendMessage(from, { text: "❌ Error executing command." });
+                    }
                 }
-            }
+            });
         }
     });
 }
