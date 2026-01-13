@@ -18,7 +18,7 @@ let sock;
 const prefix = ".";
 const thumbUrl = "https://files.catbox.moe/t4ts87.jpeg";
 
-// GLOBAL SETTINGS
+// Global Settings
 global.botSettings = {
     publicMode: true,
     alwaysOnline: true,
@@ -29,10 +29,11 @@ global.botSettings = {
     myUrl: "https://nyoni-md-free.onrender.com",
     antiSticker: true,
     stickerWarning: true,
-    stickerTimeout: 5 * 60 * 1000, // Dakika 5
+    stickerTimeout: 5 * 60 * 1000,
+    stickerBannedGroups: []
 };
 
-// --- PLUGIN LOADER ---
+// --- FIXED PLUGIN LOADER ---
 const plugins = new Map();
 function loadPlugins() {
     const pluginFolder = path.join(__dirname, 'plugins');
@@ -40,36 +41,67 @@ function loadPlugins() {
     
     const files = fs.readdirSync(pluginFolder).filter(file => file.endsWith('.js'));
     plugins.clear();
+    
     for (const file of files) {
         try {
-            delete require.cache[require.resolve(`./plugins/${file}`)];
-            const command = require(`./plugins/${file}`);
-            if (command.name) {
-                plugins.set(command.name, command);
-            }
+            const pluginPath = path.join(pluginFolder, file);
+            // Kufuta cache ili hot-reload ifanye kazi vizuri
+            delete require.cache[require.resolve(pluginPath)];
+            const command = require(pluginPath);
+            
+            // Jina la command lichukuliwe kwenye file au jina la file lenyewe
+            const cmdName = command.name || file.replace('.js', '');
+            
+            plugins.set(cmdName, {
+                ...command,
+                name: cmdName,
+                category: command.category || "OTHERS" // Default category
+            });
         } catch (e) {
-            console.error(`Error loading plugin ${file}:`, e);
+            console.error(`❌ Error loading plugin ${file}:`, e);
         }
     }
-    console.log(`✅ Loaded ${plugins.size} plugins!`);
+    console.log(`✅ Loaded ${plugins.size} plugins successfully!`);
 }
 
-// --- EXPRESS SERVER ---
-app.get('/', (req, res) => res.send("NYONI-XMD ACTIVE 🚀"));
-app.get('/code', async (req, res) => {
-    let num = req.query.number;
-    if (!num) return res.status(400).send("Weka namba!");
-    num = num.replace(/[^0-9]/g, '');
-    try {
-        if (!sock) return res.status(500).json({ error: "Inawaka..." });
-        const code = await sock.requestPairingCode(num);
-        res.status(200).json({ code: code });
-    } catch (err) { res.status(500).json({ error: "WA Error" }); }
-});
+// --- STICKER PROTECTION SYSTEM ---
+const stickerViolations = new Map();
 
-app.listen(port, () => console.log(`Server on port ${port}`));
+function checkStickerPermission(groupJid, userJid) {
+    if (!global.botSettings.antiSticker) return true;
+    if (global.botSettings.stickerBannedGroups.includes(groupJid)) return false;
+    
+    const violations = stickerViolations.get(userJid);
+    if (violations && Date.now() - violations.lastViolation < global.botSettings.stickerTimeout) {
+        return false;
+    }
+    return true;
+}
 
-// --- MAIN BOT FUNCTION ---
+async function handleStickerViolation(sock, msg, from, senderJid) {
+    const violations = stickerViolations.get(senderJid) || { count: 0, lastViolation: 0 };
+    violations.count++;
+    violations.lastViolation = Date.now();
+    stickerViolations.set(senderJid, violations);
+    
+    if (global.botSettings.stickerWarning) {
+        const warnings = violations.count;
+        let action = warnings >= 3 ? `⏳ Muted for ${global.botSettings.stickerTimeout / 60000} mins` : "";
+        
+        const warningMsg = `⚠️ *STICKER NOT ALLOWED*\n\n` +
+                          `👤 User: @${senderJid.split('@')[0]}\n` +
+                          `🚫 Warning: ${warnings}/3\n` +
+                          `${action}`;
+        
+        await sock.sendMessage(from, { text: warningMsg, mentions: [senderJid] }, { quoted: msg });
+    }
+    await sock.sendMessage(from, { delete: msg.key });
+}
+
+// --- EXPRESS SETUP ---
+app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
+app.listen(port, () => console.log(`Server live on port ${port}`));
+
 async function startNyoni() {
     loadPlugins();
     const { state, saveCreds } = await useMultiFileAuthState('./session');
@@ -81,9 +113,9 @@ async function startNyoni() {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" })),
         },
-        printQRInTerminal: false,
+        printQRInTerminal: true,
         logger: pino({ level: "silent" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        browser: ["Nyoni-XMD", "Safari", "1.0.0"]
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -91,95 +123,84 @@ async function startNyoni() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-                setTimeout(() => startNyoni(), 5000);
-            }
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            if (reason !== DisconnectReason.loggedOut) startNyoni();
         } else if (connection === 'open') {
-            const ownerJid = jidNormalizedUser(sock.user.id);
-            await sock.sendMessage(ownerJid, { text: "🚀 *NYONI-XMD CONNECTED!*" });
+            console.log('✅ CONNECTED TO WHATSAPP');
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message) return;
+        if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
         const from = msg.key.remoteJid;
         const isGroup = from.endsWith('@g.us');
-        const type = Object.keys(msg.message)[0];
-        const sender = isGroup ? msg.key.participant : msg.key.remoteJid;
-        const isOwner = msg.key.fromMe || sender.split('@')[0] === sock.user.id.split(':')[0];
+        const senderJid = isGroup ? msg.key.participant : from;
+        const isOwner = msg.key.fromMe || global.botSettings.myUrl.includes(senderJid.split('@')[0]);
 
-        // 1. ANTI-STICKER LOGIC
-        if (isGroup && type === 'stickerMessage' && global.botSettings.antiSticker && !isOwner) {
-            const groupMetadata = await sock.groupMetadata(from);
-            const isAdmin = groupMetadata.participants.find(p => p.id === sender)?.admin !== null;
-            
-            if (!isAdmin) {
-                await sock.sendMessage(from, { delete: msg.key });
-                if (global.botSettings.stickerWarning) {
-                    await sock.sendMessage(from, { text: `⚠️ @${sender.split('@')[0]} Stickers haziruhusiwi hapa!`, mentions: [sender] });
-                }
-                return;
+        // Anti-Sticker Logic
+        if (isGroup && msg.message.stickerMessage && global.botSettings.antiSticker && !isOwner) {
+            if (!checkStickerPermission(from, senderJid)) {
+                return await handleStickerViolation(sock, msg, from, senderJid);
             }
         }
 
-        // 2. AUTO STATUS
-        if (from === 'status@broadcast') {
-            if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
-            if (global.botSettings.autoStatusReact) {
-                await sock.sendMessage(from, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [sender] });
-            }
-            return;
-        }
-
-        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "").trim();
-        if (!body.startsWith(prefix)) return;
-
-        const commandName = body.slice(prefix.length).trim().split(' ')[0].toLowerCase();
+        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+        const isCmd = body.startsWith(prefix);
+        const commandName = isCmd ? body.slice(prefix.length).trim().split(' ')[0].toLowerCase() : "";
         const args = body.trim().split(/ +/).slice(1);
 
-        if (!global.botSettings.publicMode && !isOwner) return;
+        if (isCmd) {
+            if (!global.botSettings.publicMode && !isOwner) return;
 
-        // Auto Typing
-        if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
-
-        // 3. AUTOMATIC MENU
-        if (commandName === 'menu') {
-            const categories = {};
-            plugins.forEach(p => {
-                const cat = (p.category || "MAIN").toUpperCase();
-                if (!categories[cat]) categories[cat] = [];
-                categories[cat].push(p.name);
-            });
-
-            let menuText = `🚀 *NYONI-XMD DASHBOARD*\n\n`;
-            menuText += `*Prefix:* [ ${prefix} ]\n`;
-            menuText += `*Mode:* ${global.botSettings.publicMode ? 'Public' : 'Self'}\n`;
-            menuText += `*Anti-Sticker:* ${global.botSettings.antiSticker ? 'ON' : 'OFF'}\n\n`;
-
-            for (const [cat, cmds] of Object.entries(categories)) {
-                menuText += `*╭┈〔 🏠 ${cat} 〕┈─*\n`;
-                cmds.sort().forEach(cmd => {
-                    menuText += `┃ ✧ ${prefix}${cmd}\n`;
+            // --- FIXED AUTOMATIC MENU ---
+            if (commandName === 'menu' || commandName === 'help') {
+                const categories = {};
+                
+                // Kupanga plugins kwenye kundi (Categories)
+                plugins.forEach(p => {
+                    const cat = p.category.toUpperCase();
+                    if (!categories[cat]) categories[cat] = [];
+                    categories[cat].push(p.name);
                 });
-                menuText += `╰──────────┈\n\n`;
+
+                let menuText = `🚀 *NYONI-XMD BOT*\n\n`;
+                menuText += `*Prefix:* ${prefix}\n`;
+                menuText += `*Mode:* ${global.botSettings.publicMode ? 'Public' : 'Self'}\n`;
+                menuText += `*Total Commands:* ${plugins.size}\n\n`;
+
+                // Kupanga menu kulingana na category majina ya herufi (A-Z)
+                const sortedCategories = Object.keys(categories).sort();
+                
+                for (const cat of sortedCategories) {
+                    menuText += `*╭┈〔 🌟 ${cat} 〕┈─*\n`;
+                    categories[cat].sort().forEach(cmd => {
+                        menuText += `┃ ✧ ${prefix}${cmd}\n`;
+                    });
+                    menuText += `╰──────────┈\n\n`;
+                }
+
+                menuText += `_Regard Nyoni-XMD_`;
+
+                return await sock.sendMessage(from, { 
+                    image: { url: thumbUrl }, 
+                    caption: menuText 
+                }, { quoted: msg });
             }
 
-            return await sock.sendMessage(from, { image: { url: thumbUrl }, caption: menuText }, { quoted: msg });
-        }
-
-        // 4. PLUGIN EXECUTION
-        const plugin = plugins.get(commandName);
-        if (plugin) {
-            try {
-                await plugin.execute(sock, from, msg, args);
-            } catch (err) {
-                console.error(err);
+            // Plugin Execution logic
+            const plugin = plugins.get(commandName);
+            if (plugin) {
+                try {
+                    await plugin.execute(sock, from, msg, args);
+                } catch (err) {
+                    console.error(err);
+                    await sock.sendMessage(from, { text: "❌ Error executing command." });
+                }
             }
         }
     });
 }
 
-setInterval(() => { axios.get(global.botSettings.myUrl).catch(() => {}); }, 120000);
 startNyoni();
