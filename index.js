@@ -17,9 +17,9 @@ const port = process.env.PORT || 10000;
 let sock;
 const prefix = ".";
 
-// --- 1. GLOBAL SETTINGS ---
+// --- SETTINGS ---
 global.botSettings = {
-    publicMode: true,    // true = Public, false = Private
+    publicMode: true,
     alwaysOnline: true,
     autoType: true,
     autoReact: true,
@@ -28,47 +28,24 @@ global.botSettings = {
     myUrl: "https://nyoni-md-free.onrender.com" // Link yako ya Render
 };
 
-// --- 2. PAIRING & KEEP-ALIVE SERVER ---
 app.use(express.static(path.join(__dirname, '.')));
-
-app.get('/', (req, res) => {
-    res.send("NYONI-XMD STATUS: RUNNING ✅");
-});
+app.get('/', (req, res) => res.send("NYONI-XMD STATUS: RUNNING ✅"));
 
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).send("Please provide your number! Example: /code?number=255xxxxxxxxx");
+    if (!num) return res.status(400).send("Weka namba! Mfano: /code?number=255xxxxxxxxx");
     num = num.replace(/[^0-9]/g, '');
     try {
-        if (!sock) return res.status(500).send("Bot engine starting... Refresh in 10s");
+        if (!sock) return res.status(500).send("Bot engine starting...");
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
-    } catch (err) {
-        res.status(500).send("WhatsApp connection error. Try again.");
-    }
+    } catch (err) { res.status(500).send("WhatsApp Error."); }
 });
 
 app.listen(port, () => console.log(`Server live on port ${port}`));
 
-// --- 3. PLUGIN LOADER ---
-const commands = new Map();
-function loadPlugins() {
-    const pluginsPath = path.join(__dirname, 'plugins');
-    if (!fs.existsSync(pluginsPath)) fs.mkdirSync(pluginsPath);
-    const files = fs.readdirSync(pluginsPath).filter(f => f.endsWith('.js'));
-    for (const file of files) {
-        try {
-            const plugin = require(`./plugins/${file}`);
-            if (plugin.name) commands.set(plugin.name, plugin);
-        } catch (e) { console.log(`Error loading ${file}`); }
-    }
-}
-
-// --- 4. START NYONI-XMD ENGINE ---
 async function startNyoni() {
-    // Hakikisha folder la session lipo ili lisifutike kirahisi
-    if (!fs.existsSync('./session')) fs.mkdirSync('./session');
-
+    // Kutumia folder la 'session' uliloweka GitHub
     const { state, saveCreds } = await useMultiFileAuthState('./session');
     const { version } = await fetchLatestBaileysVersion();
     
@@ -83,27 +60,21 @@ async function startNyoni() {
         browser: ["Ubuntu", "Chrome", "20.0.04"] 
     });
 
-    loadPlugins();
-
-    // Inahifadhi login zako kila mara
     sock.ev.on('creds.update', saveCreds);
 
-    // --- RECONNECT LOGIC (MUHIMU SANA) ---
-    sock.ev.on('connection.update', async (update) => {
+    // --- MFUMO WA KURECONNECT ---
+    sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
-            console.log("Connection closed. Reason:", reason);
-            
-            // Kama siyo log out, iwashe tena baada ya sekunde 5
             if (reason !== DisconnectReason.loggedOut) {
-                console.log("Reconnecting in 5 seconds...");
+                console.log("Connection lost. Reconnecting in 5 seconds...");
                 setTimeout(() => startNyoni(), 5000);
             } else {
-                console.log("Logged out! Please delete session folder and re-pair.");
+                console.log("Logged out! Futa session u-pair upya.");
             }
         } else if (connection === 'open') {
-            console.log('✅ NYONI-XMD IS CONNECTED!');
+            console.log('✅ NYONI-XMD CONNECTED!');
         }
     });
 
@@ -127,19 +98,16 @@ async function startNyoni() {
         if (global.botSettings.alwaysOnline) await sock.sendPresenceUpdate('available', from);
         if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
 
-        // --- COMMANDS ZA ENGLISH ---
-        
-        // Mode switch
+        // --- COMMANDS ---
         if (isOwner && body === '.mode public') {
             global.botSettings.publicMode = true;
-            return sock.sendMessage(from, { text: "✅ *Mode:* PUBLIC" });
+            return sock.sendMessage(from, { text: "✅ *Mode updated to PUBLIC.*" });
         }
         if (isOwner && body === '.mode self') {
             global.botSettings.publicMode = false;
-            return sock.sendMessage(from, { text: "🔒 *Mode:* SELF (Private)" });
+            return sock.sendMessage(from, { text: "🔒 *Mode updated to PRIVATE.*" });
         }
 
-        // Profile Picture (.setpp)
         if (isOwner && body === '.setpp') {
             const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (quoted?.imageMessage) {
@@ -147,28 +115,15 @@ async function startNyoni() {
                 let buffer = Buffer.from([]);
                 for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                 await sock.updateProfilePicture(sock.user.id, buffer);
-                return sock.sendMessage(from, { text: "✅ *Profile picture updated successfully!*" });
-            } else {
-                return sock.sendMessage(from, { text: "❌ *Please reply to an image with .setpp*" });
+                return sock.sendMessage(from, { text: "✅ *Profile picture updated!*" });
             }
-        }
-
-        // --- COMMAND HANDLER ---
-        if (!isCmd) return;
-        const args = body.slice(prefix.length).trim().split(/ +/);
-        const cmdName = args.shift().toLowerCase();
-        const plugin = commands.get(cmdName);
-        if (plugin) {
-            try { await plugin.execute(sock, from, msg, args, commands); }
-            catch (e) { console.error(e); }
         }
     });
 }
 
-// --- 5. KEEP-ALIVE PING ---
+// Keep-alive ping kila dakika 5 kuzuia Render isilale
 setInterval(() => {
     axios.get(global.botSettings.myUrl).catch(() => {});
-    console.log("Keep-alive: Ping sent to Render.");
-}, 5 * 60 * 1000); // Kila dakika 5
+}, 5 * 60 * 1000);
 
 startNyoni();
