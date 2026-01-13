@@ -3,7 +3,8 @@ const {
     useMultiFileAuthState,
     DisconnectReason,
     makeCacheableSignalKeyStore,
-    fetchLatestBaileysVersion
+    fetchLatestBaileysVersion,
+    downloadContentFromMessage
 } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require("path");
@@ -17,27 +18,24 @@ const prefix = ".";
 
 // --- 1. GLOBAL SETTINGS ---
 global.botSettings = {
-    alwaysOnline: true,
-    autoType: true,
-    autoRecord: false,
-    autoReact: true,
-    autoStatus: true,
-    chatbot: true // Chatbot toggle
+    publicMode: true,    // Kweli = Kila mtu, Si kweli = Wewe tu
+    alwaysOnline: true,  // Bot ionekane online kila wakati
+    autoType: true,      // "typing..." kila ujumbe ukiingia
+    autoRecord: false,   // "recording..." (Zima kwa default)
+    autoReact: true,     // React ya kiotomatiki 🤖
+    autoStatus: true,    // Kuangalia status za watu kiotomatiki
+    chatbot: true        // Chatbot iko hewani
 };
 
-// --- 2. PAIRING SERVER ---
+// --- 2. PAIRING SERVER (Kwa ajili ya Render) ---
 app.use(express.static(path.join(__dirname, '.')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/code', async (req, res) => {
-    let num = req.query.number;
+    let num = req.query.number?.replace(/[^0-9]/g, '');
     if (!num) return res.status(400).json({ error: "Number required" });
-    num = num.replace(/[^0-9]/g, '');
     try {
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code });
-    } catch (err) {
-        res.status(500).json({ error: "Server Error" });
-    }
+    } catch (err) { res.status(500).json({ error: "Error" }); }
 });
 app.listen(port, () => console.log(`Server live on port ${port}`));
 
@@ -46,8 +44,8 @@ const commands = new Map();
 function loadPlugins() {
     const pluginsPath = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsPath)) fs.mkdirSync(pluginsPath);
-    const pluginFiles = fs.readdirSync(pluginsPath).filter(file => file.endsWith('.js'));
-    for (const file of pluginFiles) {
+    const files = fs.readdirSync(pluginsPath).filter(f => f.endsWith('.js'));
+    for (const file of files) {
         try {
             const plugin = require(`./plugins/${file}`);
             if (plugin.name) commands.set(plugin.name, plugin);
@@ -55,77 +53,89 @@ function loadPlugins() {
     }
 }
 
-// --- 4. START BOT ---
+// --- 4. START NYONI-XMD ---
 async function startNyoni() {
     const { state, saveCreds } = await useMultiFileAuthState('./session');
+    const { version } = await fetchLatestBaileysVersion();
+    
     sock = makeWASocket({
+        version,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
         },
         printQRInTerminal: false,
         logger: pino({ level: "fatal" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        browser: ["Nyoni-XMD", "Chrome", "20.0.04"]
     });
 
     loadPlugins();
     sock.ev.on('creds.update', saveCreds);
+
     sock.ev.on('connection.update', (u) => {
         if (u.connection === 'close') startNyoni();
-        if (u.connection === 'open') console.log('NYONI-XMD CONNECTED! 🚀');
+        if (u.connection === 'open') console.log('NYONI-XMD IS LIVE! 🚀');
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message) return;
+        if (!msg.message || msg.key.remoteJid === 'status@broadcast') {
+            if (msg.key.remoteJid === 'status@broadcast' && global.botSettings.autoStatus) {
+                await sock.readMessages([msg.key]); // View Status Automatically
+            }
+            return;
+        }
+
         const from = msg.key.remoteJid;
+        const isOwner = msg.key.fromMe;
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
         const isCmd = body.startsWith(prefix);
 
-        // A. AUTO STATUS VIEWER
-        if (from === 'status@broadcast' && global.botSettings.autoStatus) {
-            await sock.readMessages([msg.key]);
-            return;
-        }
-        if (msg.key.fromMe) return;
+        // --- PUBLIC/PRIVATE PROTECTION ---
+        if (!global.botSettings.publicMode && !isOwner) return;
 
-        // B. AUTOMATION PRESENCE
+        // --- AUTOMATION ACTIONS ---
         if (global.botSettings.alwaysOnline) await sock.sendPresenceUpdate('available', from);
         if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
-        if (global.botSettings.autoRecord) await sock.sendPresenceUpdate('recording', from);
         if (global.botSettings.autoReact) await sock.sendMessage(from, { react: { text: "🤖", key: msg.key } });
 
-        // C. CHATBOT LOGIC (Triggered if not a command)
-        if (!isCmd && global.botSettings.chatbot && body.length > 0) {
-            const input = body.toLowerCase();
-            let reply = "";
+        // --- SPECIAL COMMANDS (Inside Index) ---
+        if (isOwner && body === '.mode public') {
+            global.botSettings.publicMode = true;
+            return sock.sendMessage(from, { text: "✅ Mode: PUBLIC (Kila mtu anaweza kunitumia)" });
+        }
+        if (isOwner && body === '.mode self') {
+            global.botSettings.publicMode = false;
+            return sock.sendMessage(from, { text: "🔒 Mode: SELF (Ni Boss tu anaruhusiwa)" });
+        }
 
-            if (input.includes("hello") || input.includes("mambo")) {
-                reply = "Hello! I am NYONI-XMD. How can I assist you? Type .menu for commands.";
-            } else if (input.includes("bot")) {
-                reply = "Yes? I am active and listening! ⚡";
-            } else if (input.includes("owner")) {
-                reply = "My developer is Nyoni. You can use .owner to get his contact.";
-            }
-
-            if (reply) {
-                await sock.sendMessage(from, { text: reply }, { quoted: msg });
-                return;
+        // --- PROFILE PICTURE SETTER (.setpp) ---
+        if (isOwner && body === '.setpp') {
+            const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (quoted?.imageMessage) {
+                const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
+                let buffer = Buffer.from([]);
+                for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+                await sock.updateProfilePicture(sock.user.id, buffer); // Change Profile Picture
+                return sock.sendMessage(from, { text: "✅ Picha ya Bot imebadilishwa!" });
             }
         }
 
-        // D. COMMAND HANDLER
+        // --- CHATBOT LOGIC ---
+        if (!isCmd && global.botSettings.chatbot && body.length > 0) {
+            const input = body.toLowerCase();
+            if (input.includes("mambo")) return sock.sendMessage(from, { text: "Poa sana! Mimi ni Nyoni-XMD, nisaidie nini?" });
+            if (input.includes("nyoni")) return sock.sendMessage(from, { text: "Ndiyo, nipo hapa! ⚡" });
+        }
+
+        // --- COMMAND HANDLER ---
         if (!isCmd) return;
         const args = body.slice(prefix.length).trim().split(/ +/);
         const cmdName = args.shift().toLowerCase();
         const plugin = commands.get(cmdName);
-        
         if (plugin) {
-            try {
-                await plugin.execute(sock, from, msg, args, commands);
-            } catch (err) {
-                console.error(err);
-            }
+            try { await plugin.execute(sock, from, msg, args, commands); }
+            catch (e) { console.error(e); }
         }
     });
 }
