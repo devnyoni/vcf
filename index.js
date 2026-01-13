@@ -5,7 +5,7 @@ const {
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion,
     downloadContentFromMessage,
-    Browsers
+    jidNormalizedUser
 } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require("path");
@@ -18,15 +18,15 @@ const port = process.env.PORT || 10000;
 let sock;
 const prefix = ".";
 
-// --- GLOBAL SETTINGS (UWEZO MKUBWA) ---
+// --- GLOBAL SETTINGS (Boresha hapa) ---
 global.botSettings = {
     publicMode: true,
     alwaysOnline: true,
-    autoType: true,         // Inaonyesha Typing...
-    autoRecord: true,       // Inaonyesha Recording...
-    autoReact: true,        // Inajibu Emoji kwenye chat za kawaida
-    autoStatus: true,       // Inasoma status
-    autoStatusReact: true,  // Inajibu status kwa Emoji
+    autoType: true,         // Inaonyesha 'typing...'
+    autoRecord: true,       // Inaonyesha 'recording...'
+    autoReact: true,
+    autoStatus: true,       
+    autoStatusReact: true,  
     statusEmoji: "🫡",      
     myUrl: "https://nyoni-md-free.onrender.com"
 };
@@ -55,72 +55,62 @@ async function startNyoni() {
         version,
         auth: {
             creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" })),
         },
         printQRInTerminal: false,
-        logger: pino({ level: "fatal" }),
-        browser: Browsers.macOS("Desktop"), // Browser ya kudumu zaidi
-        syncFullHistory: false, // Inafanya iwe chap zaidi
-        markOnlineOnConnect: global.botSettings.alwaysOnline
+        logger: pino({ level: "silent" }),
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        markOnlineOnConnect: global.botSettings.alwaysOnline // Always Online
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             if (reason !== DisconnectReason.loggedOut) {
-                console.log("Connection lost. Restarting...");
-                setTimeout(() => startNyoni(), 3000); // Restart haraka zaidi (3sec)
+                console.log("Reconnecting...");
+                setTimeout(() => startNyoni(), 5000);
             }
         } else if (connection === 'open') {
-            console.log('✅ NYONI-XMD IS LIVE & FAST!');
+            console.log('✅ NYONI-XMD IS LIVE!');
+            // Notification ya kuunganishwa
+            const msg = `🚀 *NYONI-XMD CONNECTED!*\n\n*Status:* Active\n*Mode:* ${global.botSettings.publicMode ? 'Public' : 'Self'}\n*Duration:* 4 Months (Stay Active)`;
+            await sock.sendMessage(sock.user.id, { text: msg });
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') {
-            // --- AUTO STATUS VIEW & REACT (Chap) ---
-            if (msg.key.remoteJid === 'status@broadcast') {
-                if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
+            // Handle Status Updates
+            if (msg.key.remoteJid === 'status@broadcast' && global.botSettings.autoStatus) {
+                await sock.readMessages([msg.key]);
                 if (global.botSettings.autoStatusReact) {
-                    await sock.sendMessage(msg.key.remoteJid, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
+                    await sock.sendMessage('status@broadcast', { 
+                        react: { text: global.botSettings.statusEmoji, key: msg.key } 
+                    }, { statusJidList: [msg.key.participant] });
                 }
             }
             return;
         }
 
         const from = msg.key.remoteJid;
+        
+        // --- AUTO PRESENCE (Typing/Recording) ---
+        if (global.botSettings.autoType) {
+            await sock.sendPresenceUpdate('composing', from);
+        } else if (global.botSettings.autoRecord) {
+            await sock.sendPresenceUpdate('recording', from);
+        }
+
         const isOwner = msg.key.fromMe;
         const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-
-        // --- AUTO TYPING / RECORDING / ONLINE ---
-        if (global.botSettings.alwaysOnline) await sock.sendPresenceUpdate('available', from);
-        if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
-        if (global.botSettings.autoRecord) await sock.sendPresenceUpdate('recording', from);
-
-        // --- AUTO REACT TO MESSAGES ---
-        if (global.botSettings.autoReact && !isOwner) {
-            await sock.sendMessage(from, { react: { text: "⚡", key: msg.key } });
-        }
 
         if (!global.botSettings.publicMode && !isOwner) return;
 
         // --- COMMANDS ---
-        
-        // Mode switch
-        if (isOwner && body === '.mode public') {
-            global.botSettings.publicMode = true;
-            return sock.sendMessage(from, { text: "✅ *Public Mode ON*" });
-        }
-        if (isOwner && body === '.mode self') {
-            global.botSettings.publicMode = false;
-            return sock.sendMessage(from, { text: "🔒 *Private Mode ON*" });
-        }
-
-        // Fix PP Command
         if (isOwner && body.startsWith(prefix + 'setpp')) {
             const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             if (quoted?.imageMessage) {
@@ -128,16 +118,21 @@ async function startNyoni() {
                 let buffer = Buffer.from([]);
                 for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                 await sock.updateProfilePicture(sock.user.id, buffer);
-                return sock.sendMessage(from, { text: "✅ *Profile Picture Updated!*" });
+                return sock.sendMessage(from, { text: "✅ PP Updated!" });
             }
+        }
+
+        // Fix mode command
+        if (isOwner && body === '.mode public') {
+            global.botSettings.publicMode = true;
+            return sock.sendMessage(from, { text: "✅ Public Mode ON" });
         }
     });
 }
 
-// Keep-alive ya nguvu (Render isizime)
+// Keep-alive (Mhimu kwa Render/Uptime)
 setInterval(() => {
     axios.get(global.botSettings.myUrl).catch(() => {});
-    console.log("Ping sent to keep bot alive...");
-}, 2 * 60 * 1000); // Kila baada ya dk 2
+}, 3 * 60 * 1000); // Kila dakika 3
 
 startNyoni();
