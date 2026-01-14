@@ -154,9 +154,17 @@ async function handleStickerViolation(sock, msg, from, senderJid) {
     try { await sock.sendMessage(from, { delete: msg.key }); } catch (e) {}
 }
 
-// --- EXPRESS ROUTES ---
+// --- EXPRESS ROUTES & UPTIME KEEP-ALIVE ---
 app.use(express.static(path.join(__dirname, '.')));
-app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀"));
+
+// Improved Health-Check for UptimeRobot
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: "Active",
+        bot: "NYONI-XMD",
+        uptime: process.uptime()
+    });
+});
 
 app.get('/code', async (req, res) => {
     let num = req.query.number;
@@ -172,7 +180,17 @@ app.get('/plugins', (req, res) => {
     res.json({ total: plugins.size, plugins: Array.from(plugins.keys()) });
 });
 
-app.listen(port, () => console.log(`Server live on port ${port}`));
+app.listen(port, () => console.log(`🚀 Host Server live on port ${port}`));
+
+// High-Frequency Self-Ping (Every 30 seconds) to prevent sleep
+setInterval(async () => {
+    try {
+        await axios.get(global.botSettings.myUrl);
+        console.log("⚓ Uptime Check: Bot is awake.");
+    } catch (e) {
+        console.log("⚓ Uptime Check: Ping sent to host.");
+    }
+}, 30000); 
 
 async function startNyoni() {
     loadPlugins();
@@ -257,8 +275,6 @@ async function startNyoni() {
         }
     });
 }
-
-setInterval(() => { axios.get(global.botSettings.myUrl).catch(() => {}); }, 2 * 60 * 1000);
 
 startNyoni().catch(err => {
     setTimeout(() => startNyoni(), 10000);
