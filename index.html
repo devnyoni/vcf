@@ -3,549 +3,248 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NYONI-MD | PAIRING SYSTEM</title>
-    <!-- Font Awesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <title>NYONI-MD | ADVANCED PAIRING</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Poppins:wght@300;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary-red: #ff0040;
-            --primary-blue: #0066ff;
-            --fire-orange: #ff5500;
-            --dark-bg: #0a0a12;
-            --card-bg: rgba(20, 20, 35, 0.85);
-            --neon-glow: 0 0 20px rgba(255, 0, 64, 0.7);
-            --blue-glow: 0 0 20px rgba(0, 102, 255, 0.5);
+            --fire: #ff4d00;
+            --lava: #ff0000;
+            --ice-blue: #00d2ff;
+            --dark-bg: #050505;
         }
-        
-        * {
+
+        body {
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
             font-family: 'Poppins', sans-serif;
-            background: var(--dark-bg);
-            background-image: 
-                radial-gradient(circle at 20% 80%, rgba(255, 0, 64, 0.15) 0%, transparent 40%),
-                radial-gradient(circle at 80% 20%, rgba(0, 102, 255, 0.15) 0%, transparent 40%);
+            background: radial-gradient(circle at center, #1a0b0b 0%, #050505 100%);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
             overflow-x: hidden;
-            position: relative;
         }
-        
-        /* Animated background elements */
-        .bg-particle {
+
+        /* Background Animation Effects */
+        body::before {
+            content: "";
             position: absolute;
-            border-radius: 50%;
-            background: var(--primary-red);
-            opacity: 0.1;
-            animation: float 15s infinite linear;
+            width: 300px;
+            height: 300px;
+            background: var(--lava);
+            filter: blur(150px);
+            top: -50px;
+            left: -50px;
             z-index: -1;
+            opacity: 0.4;
         }
-        
-        .bg-particle:nth-child(2n) {
-            background: var(--primary-blue);
-            animation-duration: 20s;
+
+        body::after {
+            content: "";
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: var(--ice-blue);
+            filter: blur(150px);
+            bottom: -50px;
+            right: -50px;
+            z-index: -1;
+            opacity: 0.4;
         }
-        
-        .bg-particle:nth-child(3n) {
-            background: var(--fire-orange);
-            animation-duration: 25s;
-        }
-        
-        @keyframes float {
-            0% { transform: translateY(0) rotate(0deg); }
-            100% { transform: translateY(-1000px) rotate(720deg); }
-        }
-        
-        /* Main container */
+
         .container {
-            width: 100%;
-            max-width: 480px;
-            position: relative;
-            z-index: 1;
-        }
-        
-        /* Header with logo and title */
-        .header {
+            background: rgba(15, 15, 15, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 30px;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8), inset 0 0 20px rgba(255, 77, 0, 0.1);
             text-align: center;
-            margin-bottom: 30px;
+            width: 90%;
+            max-width: 450px;
+            animation: slideUp 1s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        
-        .logo {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 15px;
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(50px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        
-        .logo-icon {
-            font-size: 2.5rem;
-            background: linear-gradient(45deg, var(--primary-red), var(--fire-orange));
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            margin-right: 10px;
-            filter: drop-shadow(0 0 10px rgba(255, 0, 64, 0.7));
-        }
-        
-        .logo-text {
+
+        h1 {
             font-family: 'Orbitron', sans-serif;
             font-size: 2.2rem;
-            font-weight: 700;
-            background: linear-gradient(to right, var(--primary-red), var(--primary-blue));
+            margin-bottom: 5px;
+            background: linear-gradient(to right, #ff4d00, #00d2ff);
             -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            letter-spacing: 2px;
-            text-shadow: 0 0 15px rgba(255, 0, 64, 0.4);
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 15px rgba(255, 77, 0, 0.3);
         }
-        
+
         .tagline {
-            color: #a0a0c0;
-            font-size: 1rem;
-            font-weight: 300;
-            margin-top: 5px;
+            color: #aaa;
+            font-size: 0.9rem;
+            margin-bottom: 25px;
             letter-spacing: 1px;
         }
-        
-        /* Glass card */
-        .glass-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border-radius: 24px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 35px 30px;
-            box-shadow: 
-                0 20px 40px rgba(0, 0, 0, 0.4),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
-            margin-bottom: 25px;
-            position: relative;
-            overflow: hidden;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-        
-        .glass-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 
-                0 25px 50px rgba(0, 0, 0, 0.5),
-                var(--neon-glow),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
-        }
-        
-        .glass-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(to right, var(--primary-red), var(--primary-blue));
-            border-radius: 24px 24px 0 0;
-        }
-        
-        /* Form elements */
+
         .input-group {
-            margin-bottom: 25px;
+            position: relative;
+            margin-bottom: 20px;
         }
-        
-        .input-label {
-            display: block;
-            color: #c0c0e0;
-            font-size: 0.9rem;
-            font-weight: 500;
-            margin-bottom: 10px;
-            letter-spacing: 1px;
-        }
-        
-        .phone-input {
+
+        input {
             width: 100%;
-            padding: 18px 20px;
-            background: rgba(10, 10, 25, 0.7);
-            border: 2px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            color: white;
-            font-size: 1.1rem;
-            font-weight: 500;
-            outline: none;
-            transition: all 0.3s ease;
-            font-family: 'Poppins', sans-serif;
-        }
-        
-        .phone-input:focus {
-            border-color: var(--primary-blue);
-            box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.2);
-        }
-        
-        .phone-input::placeholder {
-            color: #666688;
-        }
-        
-        /* Primary action button */
-        .btn-primary {
-            width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, var(--primary-red), var(--fire-orange));
-            border: none;
-            border-radius: 16px;
-            color: white;
-            font-size: 1.1rem;
-            font-weight: 600;
-            letter-spacing: 1px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-family: 'Poppins', sans-serif;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            text-transform: uppercase;
-            margin-top: 10px;
-            box-shadow: 0 10px 20px rgba(255, 0, 64, 0.3);
-        }
-        
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #ff0055, #ff6600);
-            transform: translateY(-3px);
-            box-shadow: 0 15px 25px rgba(255, 0, 64, 0.4);
-        }
-        
-        .btn-primary:active {
-            transform: translateY(0);
-        }
-        
-        .btn-primary i {
-            font-size: 1.2rem;
-        }
-        
-        /* Pair code display */
-        .pair-code-container {
-            text-align: center;
-            margin-top: 25px;
-            padding: 20px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        
-        .code-label {
-            color: #a0a0c0;
-            font-size: 0.9rem;
-            margin-bottom: 10px;
-            letter-spacing: 1px;
-        }
-        
-        #pair-code {
-            font-family: 'Orbitron', monospace;
-            font-size: 2.8rem;
-            font-weight: 700;
-            letter-spacing: 8px;
-            background: linear-gradient(to right, var(--primary-red), var(--primary-blue));
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            text-shadow: 0 0 20px rgba(255, 0, 64, 0.5);
-            padding: 10px;
-            border-radius: 12px;
-            min-height: 70px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        /* Action buttons grid */
-        .action-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-top: 25px;
-        }
-        
-        .action-btn {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 18px 15px;
-            background: rgba(30, 30, 50, 0.7);
-            border-radius: 16px;
+            padding: 16px;
+            box-sizing: border-box;
+            background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #c0c0e0;
-            text-decoration: none;
-            transition: all 0.3s ease;
+            border-radius: 15px;
+            color: #fff;
+            font-size: 1.1rem;
             text-align: center;
-            font-size: 0.9rem;
-            font-weight: 500;
+            transition: 0.4s;
         }
-        
-        .action-btn:hover {
-            background: rgba(40, 40, 70, 0.9);
-            transform: translateY(-3px);
-            border-color: rgba(255, 255, 255, 0.2);
+
+        input:focus {
+            outline: none;
+            border-color: var(--fire);
+            background: rgba(255, 77, 0, 0.05);
+            box-shadow: 0 0 15px rgba(255, 77, 0, 0.2);
+        }
+
+        .btn-main {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 15px;
+            background: linear-gradient(45deg, #ff4d00, #ff0000);
             color: white;
+            font-size: 1rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: 0.3s;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
         }
-        
-        .action-btn i {
-            font-size: 1.8rem;
-            margin-bottom: 10px;
+
+        .btn-main:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(255, 0, 0, 0.5);
         }
-        
-        .btn-whatsapp { color: #25D366; }
-        .btn-whatsapp:hover { box-shadow: 0 10px 20px rgba(37, 211, 102, 0.2); }
-        
-        .btn-github { color: #f0f6fc; }
-        .btn-github:hover { box-shadow: 0 10px 20px rgba(240, 246, 252, 0.2); }
-        
-        .btn-youtube { color: #FF0000; }
-        .btn-youtube:hover { box-shadow: 0 10px 20px rgba(255, 0, 0, 0.2); }
-        
-        .btn-group { color: var(--primary-blue); }
-        .btn-group:hover { box-shadow: 0 10px 20px rgba(0, 102, 255, 0.2); }
-        
-        /* Footer */
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            color: #666688;
-            font-size: 0.85rem;
-            letter-spacing: 1px;
+
+        /* Bottom Link Buttons */
+        .links-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 25px;
         }
-        
-        .footer a {
-            color: var(--primary-blue);
+
+        .btn-link {
+            padding: 12px 8px;
+            border-radius: 12px;
             text-decoration: none;
-            transition: color 0.3s ease;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        
-        .footer a:hover {
-            color: var(--primary-red);
+
+        .btn-link:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: var(--ice-blue);
         }
-        
-        /* Loader */
+
+        .btn-yt { border-color: #ff0000 !important; color: #ff0000; }
+        .btn-git { border-color: #f0f0f0 !important; }
+
+        #pair-code {
+            margin-top: 25px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2rem;
+            color: #00ff88;
+            letter-spacing: 4px;
+            min-height: 40px;
+        }
+
         .loader {
             display: none;
-            width: 50px;
-            height: 50px;
-            margin: 20px auto;
-            position: relative;
-        }
-        
-        .loader::before,
-        .loader::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid var(--ice-blue);
             border-radius: 50%;
-            border: 3px solid transparent;
+            animation: spin 0.8s linear infinite;
+            margin: 20px auto;
         }
-        
-        .loader::before {
-            border-top-color: var(--primary-red);
-            animation: spin 1s linear infinite;
-        }
-        
-        .loader::after {
-            border-top-color: var(--primary-blue);
-            animation: spin 1.5s linear infinite reverse;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* Responsive design */
-        @media (max-width: 576px) {
-            .container {
-                max-width: 95%;
-            }
-            
-            .action-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .logo-text {
-                font-size: 1.8rem;
-            }
-            
-            #pair-code {
-                font-size: 2.2rem;
-                letter-spacing: 6px;
-            }
-            
-            .glass-card {
-                padding: 25px 20px;
-            }
-        }
-        
-        @media (max-width: 400px) {
-            #pair-code {
-                font-size: 1.8rem;
-                letter-spacing: 4px;
-            }
-        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
     </style>
 </head>
 <body>
-    <!-- Background particles -->
-    <div id="particles"></div>
-    
+
     <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div class="logo">
-                <i class="fas fa-robot logo-icon"></i>
-                <h1 class="logo-text">NYONI-MD</h1>
-            </div>
-            <p class="tagline">Advanced WhatsApp Bot Pairing System</p>
+        <h1>NYONI-MD</h1>
+        <p class="tagline">WhatsApp Bot Connection Terminal</p>
+        
+        <div class="input-group">
+            <input type="number" id="phoneNumber" placeholder="e.g. 255788313105">
         </div>
         
-        <!-- Main card -->
-        <div class="glass-card">
-            <div class="input-group">
-                <label class="input-label">YOUR PHONE NUMBER</label>
-                <input type="tel" class="phone-input" id="phoneNumber" placeholder="255788313105" maxlength="15">
-            </div>
-            
-            <button class="btn-primary" onclick="getPairCode()">
-                <i class="fas fa-bolt"></i>
-                GENERATE PAIR CODE
-            </button>
-            
-            <!-- Loader -->
-            <div class="loader" id="loader"></div>
-            
-            <!-- Pair code display -->
-            <div class="pair-code-container">
-                <div class="code-label">YOUR PAIR CODE</div>
-                <div id="pair-code"></div>
-            </div>
-        </div>
+        <button class="btn-main" onclick="getPairCode()">Generate Pairing Code</button>
         
-        <!-- Action buttons -->
-        <div class="action-grid">
-            <a href="https://whatsapp.com/channel/0029VbAffhD2ZjChG9DX922r" target="_blank" class="action-btn btn-whatsapp">
-                <i class="fab fa-whatsapp"></i>
-                <span>OFFICIAL CHANNEL</span>
-            </a>
-            
-            <a href="https://chat.whatsapp.com/F723KYvts6aEwqStcdtZb7" target="_blank" class="action-btn btn-group">
-                <i class="fas fa-users"></i>
-                <span>SUPPORT GROUP</span>
-            </a>
-            
-            <a href="https://github.com/Raheem-cm/RAHEEM-XMD-3/fork" target="_blank" class="action-btn btn-github">
-                <i class="fab fa-github"></i>
-                <span>FORK REPOSITORY</span>
-            </a>
-            
-            <a href="https://youtube.com/@chiefmamba-cm18?si=bCD41fK-FNkibwxM" target="_blank" class="action-btn btn-youtube">
-                <i class="fab fa-youtube"></i>
-                <span>DEVELOPER YOUTUBE</span>
-            </a>
-        </div>
-        
-        <!-- Footer -->
-        <div class="footer">
-            <p>© 2026 NYONI-MD • Built with <i class="fas fa-heart" style="color: var(--primary-red);"></i> by nyoni-xmd</p>
+        <div class="loader" id="loader"></div>
+        <div id="pair-code"></div>
+
+        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 25px 0;">
+
+        <div class="links-grid">
+            <a href="https://whatsapp.com/channel/0029VbAffhD2ZjChG9DX922r" target="_blank" class="btn-link">WhatsApp Channel</a>
+            <a href="https://chat.whatsapp.com/F723KYvts6aEwqStcdtZb7" target="_blank" class="btn-link">Support Group</a>
+            <a href="https://github.com/Raheem-cm/RAHEEM-XMD-3/fork" target="_blank" class="btn-link btn-git">Fork Bot Repo</a>
+            <a href="https://youtube.com/@chiefmamba-cm18?si=bCD41fK-FNkibwxM" target="_blank" class="btn-link btn-yt">Support Developer</a>
         </div>
     </div>
 
     <script>
-        // Create background particles
-        function createParticles() {
-            const particlesContainer = document.getElementById('particles');
-            const particleCount = 15;
-            
-            for (let i = 0; i < particleCount; i++) {
-                const particle = document.createElement('div');
-                particle.className = 'bg-particle';
-                
-                // Random size and position
-                const size = Math.random() * 100 + 20;
-                particle.style.width = `${size}px`;
-                particle.style.height = `${size}px`;
-                particle.style.left = `${Math.random() * 100}%`;
-                particle.style.top = `${Math.random() * 100}%`;
-                
-                // Random animation delay
-                particle.style.animationDelay = `${Math.random() * 20}s`;
-                
-                particlesContainer.appendChild(particle);
-            }
-        }
-        
-        // Generate pair code (simulated for demo)
         async function getPairCode() {
             const num = document.getElementById('phoneNumber').value;
             const codeDiv = document.getElementById('pair-code');
             const loader = document.getElementById('loader');
             
-            if (!num || num.length < 9) {
-                alert("Please enter a valid phone number!");
+            if(!num) {
+                alert("Please enter your phone number!");
                 return;
             }
-            
-            // Clear previous code and show loader
+
             codeDiv.innerText = "";
             loader.style.display = "block";
-            
-            // Simulate API call with delay
-            setTimeout(() => {
-                // Generate a 6-digit code
-                const generatedCode = Math.floor(100000 + Math.random() * 900000);
-                codeDiv.innerText = generatedCode;
-                
-                // Hide loader
+
+            try {
+                const response = await fetch(`/code?number=${num}`);
+                const data = await response.json();
                 loader.style.display = "none";
                 
-                // Add animation effect
-                codeDiv.style.animation = "none";
-                setTimeout(() => {
-                    codeDiv.style.animation = "fadeIn 0.5s ease";
-                }, 10);
-                
-                // For demo purposes, log the action
-                console.log(`Pair code ${generatedCode} generated for ${num}`);
-            }, 1500);
+                if(data.code) {
+                    codeDiv.style.color = "#00ff88";
+                    codeDiv.innerText = data.code;
+                } else {
+                    codeDiv.style.color = "#ff4d00";
+                    codeDiv.innerText = "TRY AGAIN";
+                }
+            } catch (err) {
+                loader.style.display = "none";
+                codeDiv.style.color = "#ff0000";
+                codeDiv.innerText = "ERROR!";
+            }
         }
-        
-        // Format phone number as user types
-        document.getElementById('phoneNumber').addEventListener('input', function(e) {
-            let value = e.target.value.replace(/\D/g, '');
-            
-            // Format with country code
-            if (value.length > 0 && !value.startsWith('255')) {
-                value = '255' + value;
-            }
-            
-            // Limit to 12 digits (255 + 9 digits)
-            if (value.length > 12) {
-                value = value.substring(0, 12);
-            }
-            
-            e.target.value = value;
-        });
-        
-        // Initialize particles on load
-        window.addEventListener('DOMContentLoaded', createParticles);
-        
-        // Add Enter key support for generating code
-        document.getElementById('phoneNumber').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                getPairCode();
-            }
-        });
     </script>
 </body>
 </html>
