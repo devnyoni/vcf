@@ -1,6 +1,5 @@
 const {
     default: makeWASocket,
-    useMultiFileAuthState,
     DisconnectReason,
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion,
@@ -11,12 +10,52 @@ const path = require("path");
 const pino = require("pino");
 const express = require("express");
 const axios = require("axios");
+const Database = require('better-sqlite3'); // <<< REKEDEBISHA 1: IMPORT SQLITE
 
 const app = express();
 const port = process.env.PORT || 10000;
 let sock;
 const prefix = ".";
 const thumbUrl = "https://files.catbox.moe/t4ts87.jpeg";
+
+// REKEDEBISHA 2: UNDA HIFADHI YA SQLITE KWA UMILIKI
+const db = new Database('./auth_state.db', { verbose: console.log });
+
+// Hakikisha jedwali lipo
+db.exec(`
+    CREATE TABLE IF NOT EXISTS auth_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+`);
+
+const authStore = {
+    state: {
+        creds: {},
+        keys: {}
+    },
+
+    async saveCreds() {
+        const stmt = db.prepare('INSERT OR REPLACE INTO auth_state (key, value) VALUES (?, ?)');
+        stmt.run('creds', JSON.stringify(this.state.creds));
+        console.log('🔐 Auth credentials saved to SQLite');
+    },
+
+    async loadCreds() {
+        const row = db.prepare('SELECT value FROM auth_state WHERE key = ?').get('creds');
+        if (row) {
+            this.state.creds = JSON.parse(row.value);
+            console.log('🔐 Auth credentials loaded from SQLite');
+        }
+        return this.state.creds;
+    },
+
+    async clearCreds() {
+        db.prepare('DELETE FROM auth_state WHERE key = ?').run('creds');
+        this.state.creds = {};
+        console.log('🔐 Auth credentials cleared');
+    }
+};
 
 // Global Settings
 global.botSettings = {
@@ -26,7 +65,7 @@ global.botSettings = {
     autoStatus: true,
     autoStatusReact: true,
     statusEmoji: "🫡",
-    myUrl: "https://nyoni-md-free.onrender.com",
+    myUrl: process.env.APP_URL || "https://nyoni-md-free.onrender.com",
     antiSticker: true,
     stickerWarning: true,
     stickerTimeout: 5 * 60 * 1000,
@@ -89,6 +128,7 @@ function generateAutoMenu() {
     menuText += `✧ Plugins: ${plugins.size}\n`;
     menuText += `✧ Public: ${global.botSettings.publicMode ? '✅' : '❌'}\n`;
     menuText += `✧ Anti-Sticker: ${global.botSettings.antiSticker ? '✅' : '❌'}\n`;
+    menuText += `✧ Database: SQLite ✅\n`;
     
     return menuText;
 }
@@ -154,128 +194,208 @@ async function handleStickerViolation(sock, msg, from, senderJid) {
     try { await sock.sendMessage(from, { delete: msg.key }); } catch (e) {}
 }
 
-// --- EXPRESS ROUTES & UPTIME KEEP-ALIVE ---
+// --- EXPRESS ROUTES ---
 app.use(express.static(path.join(__dirname, '.')));
-
-// Improved Health-Check for UptimeRobot
-app.get('/', (req, res) => {
-    res.status(200).json({
-        status: "Active",
-        bot: "NYONI-XMD",
-        uptime: process.uptime()
-    });
-});
+app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀 - SQLite Edition"));
 
 app.get('/code', async (req, res) => {
     let num = req.query.number;
-    if (!num) return res.status(400).send("Enter number!");
+    if (!num) return res.status(400).send("Enter number! Example: /code?number=255xxxxxxxxx");
     num = num.replace(/[^0-9]/g, '');
     try {
+        if (!sock || !sock.user) {
+            return res.status(500).json({ error: "Bot is connecting. Please wait 15 seconds." });
+        }
         const code = await sock.requestPairingCode(num);
         res.status(200).json({ code: code });
-    } catch (err) { res.status(500).json({ error: "WhatsApp Error." }); }
+    } catch (err) { 
+        console.error("Pairing error:", err);
+        res.status(500).json({ error: "WhatsApp Error or Wrong Number." }); 
+    }
 });
 
 app.get('/plugins', (req, res) => {
-    res.json({ total: plugins.size, plugins: Array.from(plugins.keys()) });
+    const pluginList = Array.from(plugins.keys());
+    res.json({ total: plugins.size, plugins: pluginList });
 });
 
-app.listen(port, () => console.log(`🚀 Host Server live on port ${port}`));
+app.get('/auth-status', (req, res) => {
+    const row = db.prepare('SELECT value FROM auth_state WHERE key = ?').get('creds');
+    const hasAuth = !!row;
+    res.json({ authenticated: hasAuth, usingDatabase: "SQLite" });
+});
 
-// High-Frequency Self-Ping (Every 30 seconds) to prevent sleep
-setInterval(async () => {
-    try {
-        await axios.get(global.botSettings.myUrl);
-        console.log("⚓ Uptime Check: Bot is awake.");
-    } catch (e) {
-        console.log("⚓ Uptime Check: Ping sent to host.");
-    }
-}, 30000); 
+app.listen(port, () => console.log(`🚀 Server live on port ${port} (SQLite Edition)`));
 
+// --- REKEDEBISHA 3: START BOTI KWA SQLITE ---
 async function startNyoni() {
-    loadPlugins();
-    const { state, saveCreds } = await useMultiFileAuthState('./session');
-    const { version } = await fetchLatestBaileysVersion();
-    
-    sock = makeWASocket({
-        version,
-        auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" })),
-        },
-        printQRInTerminal: false,
-        logger: pino({ level: "silent" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
-        markOnlineOnConnect: true
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            if (reason !== DisconnectReason.loggedOut) setTimeout(() => startNyoni(), 5000);
-        } else if (connection === 'open') {
-            console.log('✅ NYONI-XMD IS LIVE!');
-            await sock.sendMessage(jidNormalizedUser(sock.user.id), { text: "🚀 *NYONI-XMD CONNECTED!*" });
-        }
-    });
-
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message) return;
-
-        const from = msg.key.remoteJid;
-        const isGroup = from.endsWith('@g.us');
+    try {
+        console.log('🔧 Initializing NYONI-XMD with SQLite storage...');
+        loadPlugins();
         
-        if (isGroup && msg.message.stickerMessage && global.botSettings.antiSticker) {
-            const senderJid = msg.key.participant || msg.key.remoteJid;
-            if (!checkStickerPermission(from, senderJid)) {
-                await handleStickerViolation(sock, msg, from, senderJid);
-                return;
-            }
-        }
+        // 1. PATA CREDS KUTOKA SQLITE
+        await authStore.loadCreds();
+        
+        // 2. PAKUA VERSION YA BAILEYS
+        const { version } = await fetchLatestBaileysVersion();
+        
+        // 3. UNDA SOCKET
+        sock = makeWASocket({
+            version,
+            auth: {
+                creds: authStore.state.creds,
+                keys: makeCacheableSignalKeyStore({}, pino({ level: "silent" })), // Keys tupu kwani hazi-hifadhiwi
+            },
+            printQRInTerminal: true, // Weka true kwa ajili ya debugging
+            logger: pino({ level: "silent" }),
+            browser: ["Ubuntu", "Chrome", "20.0.04"],
+            markOnlineOnConnect: true
+        });
 
-        if (from === 'status@broadcast') {
-            if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
-            if (global.botSettings.autoStatusReact) {
-                await sock.sendMessage(from, { react: { text: global.botSettings.statusEmoji, key: msg.key } }, { statusJidList: [msg.key.participant] });
-            }
-            return;
-        }
+        // 4. WEKA CREDS UPDATE HANDLER
+        sock.ev.on('creds.update', async () => {
+            console.log('📝 Updating credentials in SQLite...');
+            await authStore.saveCreds();
+        });
 
-        const isOwner = msg.key.fromMe || from.split('@')[0] === sock.user.id.split(':')[0];
-        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || "").trim();
-        const isCmd = body.startsWith(prefix);
-        const commandName = isCmd ? body.slice(prefix.length).trim().split(' ')[0].toLowerCase() : "";
-        const args = body.trim().split(/ +/).slice(1);
-
-        if (isCmd) {
-            if (!global.botSettings.publicMode && !isOwner) return;
-
-            if (commandName === 'menu' || commandName === 'help' && !args[0]) {
-                loadPlugins();
-                const menuText = generateAutoMenu();
-                return await sock.sendMessage(from, { image: { url: thumbUrl }, caption: menuText }, { quoted: msg });
+        // 5. WEKA CONNECTION UPDATE HANDLER
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            
+            // Display QR Code kama ipo
+            if (qr) {
+                console.log('📱 Scan QR Code below:');
+                // QR itaonekana kwenye terminal kwa sababu printQRInTerminal = true
             }
             
-            if (commandName === 'help' && args[0]) {
-                return await sock.sendMessage(from, { text: generateHelp(args[0].toLowerCase()) }, { quoted: msg });
+            if (connection === 'close') {
+                const reason = lastDisconnect?.error?.output?.statusCode;
+                console.log(`🔌 Connection closed. Reason code: ${reason}`);
+                
+                if (reason !== DisconnectReason.loggedOut) {
+                    console.log("🔄 Attempting to reconnect in 5 seconds...");
+                    setTimeout(() => {
+                        console.log('🔄 Starting reconnection...');
+                        startNyoni().catch(e => console.error('Reconnection failed:', e));
+                    }, 5000);
+                } else {
+                    console.log("❌ Logged out. Clearing credentials...");
+                    await authStore.clearCreds();
+                }
+            } else if (connection === 'open') {
+                console.log('✅ NYONI-XMD IS LIVE! (Using SQLite Storage)');
+                
+                // Save credentials immediately after connection
+                await authStore.saveCreds();
+                
+                // Notify owner
+                const ownerJid = jidNormalizedUser(sock.user.id);
+                await sock.sendMessage(ownerJid, { 
+                    text: "🚀 *NYONI-XMD CONNECTED!*\n\n" +
+                          "✅ Using SQLite for persistent storage\n" +
+                          "✅ Automatic menu system active\n" +
+                          "✅ Anti-sticker protection enabled\n" +
+                          `📊 Plugins loaded: ${plugins.size}`
+                });
             }
+        });
 
-            const plugin = plugins.get(commandName);
-            if (plugin) {
-                try {
-                    await plugin.execute(sock, from, msg, args);
-                } catch (err) {
-                    await sock.sendMessage(from, { text: `❌ Error executing ${prefix}${commandName}` });
+        // 6. WEKA MESSAGE HANDLER
+        sock.ev.on('messages.upsert', async (m) => {
+            const msg = m.messages[0];
+            if (!msg.message) return;
+
+            const from = msg.key.remoteJid;
+            const isGroup = from.endsWith('@g.us');
+            
+            // Anti-sticker check
+            if (isGroup && msg.message.stickerMessage && global.botSettings.antiSticker) {
+                const senderJid = msg.key.participant || msg.key.remoteJid;
+                if (!checkStickerPermission(from, senderJid)) {
+                    await handleStickerViolation(sock, msg, from, senderJid);
+                    return;
                 }
             }
-        }
-    });
+
+            // Status auto-view/react
+            if (from === 'status@broadcast') {
+                if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
+                if (global.botSettings.autoStatusReact) {
+                    await sock.sendMessage(from, { 
+                        react: { text: global.botSettings.statusEmoji, key: msg.key } 
+                    }, { statusJidList: [msg.key.participant] });
+                }
+                return;
+            }
+
+            const isOwner = msg.key.fromMe || from.split('@')[0] === sock.user.id.split(':')[0];
+            const body = (msg.message.conversation || 
+                         msg.message.extendedTextMessage?.text || 
+                         msg.message.imageMessage?.caption || 
+                         msg.message.videoMessage?.caption || "").trim();
+            const isCmd = body.startsWith(prefix);
+            const commandName = isCmd ? body.slice(prefix.length).trim().split(' ')[0].toLowerCase() : "";
+            const args = body.trim().split(/ +/).slice(1);
+
+            if (isCmd) {
+                if (!global.botSettings.publicMode && !isOwner) return;
+
+                // Auto react
+                await sock.sendMessage(from, { react: { text: "⚡", key: msg.key } });
+                if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
+
+                // Menu command
+                if (commandName === 'menu' || (commandName === 'help' && !args[0])) {
+                    loadPlugins(); // Reload plugins for fresh menu
+                    const menuText = generateAutoMenu();
+                    return await sock.sendMessage(from, { 
+                        image: { url: thumbUrl }, 
+                        caption: menuText 
+                    }, { quoted: msg });
+                }
+                
+                // Help for specific command
+                if (commandName === 'help' && args[0]) {
+                    return await sock.sendMessage(from, { 
+                        text: generateHelp(args[0].toLowerCase()) 
+                    }, { quoted: msg });
+                }
+                
+                // Plugin command handler
+                const plugin = plugins.get(commandName);
+                if (plugin) {
+                    try {
+                        await plugin.execute(sock, from, msg, args);
+                    } catch (err) {
+                        console.error(`Error in plugin ${commandName}:`, err);
+                        await sock.sendMessage(from, { 
+                            text: `❌ Error executing ${prefix}${commandName}\nError: ${err.message || 'Unknown error'}` 
+                        });
+                    }
+                } else if (isCmd) {
+                    await sock.sendMessage(from, { 
+                        text: `❌ Command "${commandName}" not found!\nUse ${prefix}menu to see all available commands.`
+                    });
+                }
+            }
+        });
+
+        console.log('🤖 Bot initialization complete. Waiting for connection...');
+
+    } catch (error) {
+        console.error('❌ CRITICAL ERROR during bot startup:', error);
+        console.log('🔄 Attempting restart in 10 seconds...');
+        setTimeout(() => {
+            startNyoni().catch(e => console.error('Restart failed:', e));
+        }, 10000);
+    }
 }
 
-startNyoni().catch(err => {
-    setTimeout(() => startNyoni(), 10000);
-});
+// Keep-alive ping
+setInterval(() => {
+    axios.get(global.botSettings.myUrl).catch(() => {});
+}, 2 * 60 * 1000);
+
+// Start the bot
+startNyoni();
+            
