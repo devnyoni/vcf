@@ -4,7 +4,7 @@
   "description": "Simple and Fast WhatsApp Bot",
   "main": "index.js",
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
+    "@whiskeysockets/baileys": "^6.7.9",
     "axios": "^1.6.0",
     "express": "^4.18.2",
     "pino": "^8.16.1",
