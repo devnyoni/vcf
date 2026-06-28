@@ -1,16 +1,19 @@
+// ======================== NYONI-XMD INDEX (SQLITE FIX) ========================
 const {
     default: makeWASocket,
     DisconnectReason,
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion,
-    jidNormalizedUser
+    jidNormalizedUser,
+    Browsers
 } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require("path");
 const pino = require("pino");
 const express = require("express");
 const axios = require("axios");
-const Database = require('better-sqlite3'); // <<< REKEDEBISHA 1: IMPORT SQLITE
+const Database = require('better-sqlite3');
+const { randomBytes } = require('crypto');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -18,15 +21,19 @@ let sock;
 const prefix = ".";
 const thumbUrl = "https://files.catbox.moe/t4ts87.jpeg";
 
-// REKEDEBISHA 2: UNDA HIFADHI YA SQLITE KWA UMILIKI
+// ========== SQLITE AUTH STORAGE (FULL) ==========
 const db = new Database('./auth_state.db', { verbose: console.log });
 
-// Hakikisha jedwali lipo
+// Create tables if they don't exist
 db.exec(`
-    CREATE TABLE IF NOT EXISTS auth_state (
+    CREATE TABLE IF NOT EXISTS auth_creds (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
-    )
+    );
+    CREATE TABLE IF NOT EXISTS auth_keys (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
 `);
 
 const authStore = {
@@ -36,13 +43,13 @@ const authStore = {
     },
 
     async saveCreds() {
-        const stmt = db.prepare('INSERT OR REPLACE INTO auth_state (key, value) VALUES (?, ?)');
+        const stmt = db.prepare('INSERT OR REPLACE INTO auth_creds (key, value) VALUES (?, ?)');
         stmt.run('creds', JSON.stringify(this.state.creds));
         console.log('🔐 Auth credentials saved to SQLite');
     },
 
     async loadCreds() {
-        const row = db.prepare('SELECT value FROM auth_state WHERE key = ?').get('creds');
+        const row = db.prepare('SELECT value FROM auth_creds WHERE key = ?').get('creds');
         if (row) {
             this.state.creds = JSON.parse(row.value);
             console.log('🔐 Auth credentials loaded from SQLite');
@@ -50,14 +57,33 @@ const authStore = {
         return this.state.creds;
     },
 
+    async saveKeys() {
+        const stmt = db.prepare('INSERT OR REPLACE INTO auth_keys (key, value) VALUES (?, ?)');
+        for (const [key, value] of Object.entries(this.state.keys)) {
+            stmt.run(key, JSON.stringify(value));
+        }
+        console.log('🔐 Auth keys saved to SQLite');
+    },
+
+    async loadKeys() {
+        const rows = db.prepare('SELECT key, value FROM auth_keys').all();
+        for (const row of rows) {
+            this.state.keys[row.key] = JSON.parse(row.value);
+        }
+        console.log('🔐 Auth keys loaded from SQLite');
+        return this.state.keys;
+    },
+
     async clearCreds() {
-        db.prepare('DELETE FROM auth_state WHERE key = ?').run('creds');
+        db.prepare('DELETE FROM auth_creds').run();
+        db.prepare('DELETE FROM auth_keys').run();
         this.state.creds = {};
-        console.log('🔐 Auth credentials cleared');
+        this.state.keys = {};
+        console.log('🔐 Auth data cleared');
     }
 };
 
-// Global Settings
+// ========== GLOBAL SETTINGS ==========
 global.botSettings = {
     publicMode: true,
     alwaysOnline: true,
@@ -72,50 +98,61 @@ global.botSettings = {
     stickerBannedGroups: []
 };
 
-// --- PLUGIN LOADER ---
-const plugins = new Map();
-const pluginDescriptions = new Map();
+// ========== COMMAND REGISTRY (GLOBAL) ==========
+global.commands = new Map();
+global.aliases = new Map();
+global.commandsList = [];
 
+function registerCommand(cmd) {
+    if (!cmd.command) return;
+    global.commands.set(cmd.command, cmd);
+    if (cmd.alias && Array.isArray(cmd.alias)) {
+        cmd.alias.forEach(a => global.aliases.set(a, cmd.command));
+    }
+    global.commandsList.push(cmd);
+    console.log(`📝 Registered: ${cmd.command}`);
+}
+
+function getCommand(name) {
+    return global.commands.get(name) || global.commands.get(global.aliases.get(name));
+}
+
+global.registerCommand = registerCommand;
+global.getCommand = getCommand;
+
+// ========== PLUGIN LOADER (INAYOTUMIA COMMAND SYSTEM) ==========
 function loadPlugins() {
     const pluginFolder = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginFolder)) fs.mkdirSync(pluginFolder, { recursive: true });
     
     const files = fs.readdirSync(pluginFolder).filter(file => file.endsWith('.js'));
-    plugins.clear();
-    pluginDescriptions.clear();
+    // Clear previous commands (but keep default ones if any)
+    global.commands.clear();
+    global.aliases.clear();
+    global.commandsList = [];
     
     for (const file of files) {
         try {
             delete require.cache[require.resolve(`./plugins/${file}`)];
-            const command = require(`./plugins/${file}`);
-            
-            if (command.name) {
-                plugins.set(command.name, command);
-                pluginDescriptions.set(command.name, {
-                    description: command.description || "No description",
-                    category: command.category || "GENERAL",
-                    usage: command.usage || command.name
-                });
-            }
+            require(`./plugins/${file}`);
+            console.log(`✅ Loaded plugin: ${file}`);
         } catch (e) {
             console.error(`Error loading plugin ${file}:`, e);
         }
     }
-    console.log(`✅ Loaded ${plugins.size} plugins automatically!`);
+    console.log(`✅ Total commands loaded: ${global.commandsList.length}`);
 }
 
-// --- AUTOMATIC MENU GENERATOR (UREMBO MPYA) ---
+// ========== MENU GENERATOR (AUTO) ==========
 function generateAutoMenu() {
     const categories = {};
-    
-    pluginDescriptions.forEach((info, name) => {
-        const cat = info.category;
+    for (const cmd of global.commandsList) {
+        const cat = cmd.category || "GENERAL";
         if (!categories[cat]) categories[cat] = [];
-        categories[cat].push(name);
-    });
+        categories[cat].push(cmd.command);
+    }
     
     let menuText = `🚀 *NYONI-XMD AUTOMATIC MENU*\n\n`;
-    
     for (const [category, commands] of Object.entries(categories)) {
         menuText += `*╭┈〔 💞 ${category.toUpperCase()} 〕┈─*\n`;
         commands.forEach(cmd => {
@@ -125,7 +162,7 @@ function generateAutoMenu() {
     }
     
     menuText += `📊 *SYSTEM STATUS*\n`;
-    menuText += `✧ Plugins: ${plugins.size}\n`;
+    menuText += `✧ Commands: ${global.commandsList.length}\n`;
     menuText += `✧ Public: ${global.botSettings.publicMode ? '✅' : '❌'}\n`;
     menuText += `✧ Anti-Sticker: ${global.botSettings.antiSticker ? '✅' : '❌'}\n`;
     menuText += `✧ Database: SQLite ✅\n`;
@@ -133,38 +170,24 @@ function generateAutoMenu() {
     return menuText;
 }
 
-// --- HELP COMMAND GENERATOR ---
+// ========== HELP COMMAND ==========
 function generateHelp(commandName) {
-    if (!plugins.has(commandName)) {
-        return `❌ Command "${commandName}" not found!\nUse ${prefix}menu to see all available commands.`;
-    }
+    const cmd = getCommand(commandName);
+    if (!cmd) return `❌ Command "${commandName}" not found!\nUse ${prefix}menu to see all available commands.`;
     
-    const command = plugins.get(commandName);
-    const info = pluginDescriptions.get(commandName);
-    
-    let helpText = `╭───『 📘 𝐇𝐄𝐋𝐏: ${prefix}${commandName.toUpperCase()} 』\n`;
+    let helpText = `╭───『 📘 𝐇𝐄𝐋𝐏: ${prefix}${cmd.command.toUpperCase()} 』\n`;
     helpText += `│\n`;
-    helpText += `│ 📝 *Description:* ${info.description}\n`;
-    helpText += `│ 🏷️ *Category:* ${info.category}\n`;
-    helpText += `│ 📌 *Usage:* ${prefix}${info.usage}\n`;
-    
-    if (command.examples) {
-        helpText += `│\n│ 📚 *Examples:*\n`;
-        command.examples.forEach(example => {
-            helpText += `│   └─ ${prefix}${example}\n`;
-        });
+    helpText += `│ 📝 *Description:* ${cmd.desc || "No description"}\n`;
+    helpText += `│ 🏷️ *Category:* ${cmd.category || "GENERAL"}\n`;
+    helpText += `│ 📌 *Usage:* ${prefix}${cmd.command}\n`;
+    if (cmd.alias && cmd.alias.length > 0) {
+        helpText += `│ 🔤 *Aliases:* ${cmd.alias.map(a => `${prefix}${a}`).join(', ')}\n`;
     }
-    
-    if (command.aliases && command.aliases.length > 0) {
-        helpText += `│\n│ 🔤 *Aliases:* ${command.aliases.map(a => `${prefix}${a}`).join(', ')}\n`;
-    }
-    
     helpText += `╰──────────────────────────\n`;
-    
     return helpText;
 }
 
-// --- STICKER PROTECTION SYSTEM ---
+// ========== ANTI-STICKER PROTECTION ==========
 const stickerViolations = new Map();
 
 function checkStickerPermission(groupJid, userJid) {
@@ -187,14 +210,13 @@ async function handleStickerViolation(sock, msg, from, senderJid) {
     if (global.botSettings.stickerWarning) {
         const warnings = violations.count;
         let action = warnings >= 3 ? `⏳ Muted for ${global.botSettings.stickerTimeout / (60 * 1000)} minutes` : "";
-        
         const warningMsg = `⚠️ *STICKER WARNING*\n\nUser: @${senderJid.split('@')[0]}\nWarning #${warnings}\n${action}`;
         await sock.sendMessage(from, { text: warningMsg, mentions: [senderJid] }, { quoted: msg });
     }
     try { await sock.sendMessage(from, { delete: msg.key }); } catch (e) {}
 }
 
-// --- EXPRESS ROUTES ---
+// ========== EXPRESS ROUTES ==========
 app.use(express.static(path.join(__dirname, '.')));
 app.get('/', (req, res) => res.send("NYONI-XMD STATUS: ACTIVE 🚀 - SQLite Edition"));
 
@@ -215,57 +237,57 @@ app.get('/code', async (req, res) => {
 });
 
 app.get('/plugins', (req, res) => {
-    const pluginList = Array.from(plugins.keys());
-    res.json({ total: plugins.size, plugins: pluginList });
+    const pluginList = Array.from(global.commands.keys());
+    res.json({ total: pluginList.length, plugins: pluginList });
 });
 
 app.get('/auth-status', (req, res) => {
-    const row = db.prepare('SELECT value FROM auth_state WHERE key = ?').get('creds');
+    const row = db.prepare('SELECT value FROM auth_creds WHERE key = ?').get('creds');
     const hasAuth = !!row;
     res.json({ authenticated: hasAuth, usingDatabase: "SQLite" });
 });
 
 app.listen(port, () => console.log(`🚀 Server live on port ${port} (SQLite Edition)`));
 
-// --- REKEDEBISHA 3: START BOTI KWA SQLITE ---
+// ========== BOT START ==========
 async function startNyoni() {
     try {
-        console.log('🔧 Initializing NYONI-XMD with SQLite storage...');
-        loadPlugins();
+        console.log('🔧 Initializing NYONI-XMD with full SQLite storage...');
         
-        // 1. PATA CREDS KUTOKA SQLITE
+        // Load credentials and keys from SQLite
         await authStore.loadCreds();
-        
-        // 2. PAKUA VERSION YA BAILEYS
+        await authStore.loadKeys();
+
+        // Fetch Baileys version
         const { version } = await fetchLatestBaileysVersion();
-        
-        // 3. UNDA SOCKET
+
+        // Create socket with full key store
         sock = makeWASocket({
             version,
             auth: {
                 creds: authStore.state.creds,
-                keys: makeCacheableSignalKeyStore({}, pino({ level: "silent" })), // Keys tupu kwani hazi-hifadhiwi
+                keys: makeCacheableSignalKeyStore(authStore.state.keys, pino({ level: "silent" })),
             },
-            printQRInTerminal: true, // Weka true kwa ajili ya debugging
+            printQRInTerminal: true,
             logger: pino({ level: "silent" }),
-            browser: ["Ubuntu", "Chrome", "20.0.04"],
-            markOnlineOnConnect: true
+            browser: Browsers.macOS("Firefox"),
+            markOnlineOnConnect: global.botSettings.alwaysOnline,
+            syncFullHistory: true,
         });
 
-        // 4. WEKA CREDS UPDATE HANDLER
+        // Handle credential updates
         sock.ev.on('creds.update', async () => {
             console.log('📝 Updating credentials in SQLite...');
             await authStore.saveCreds();
+            await authStore.saveKeys();
         });
 
-        // 5. WEKA CONNECTION UPDATE HANDLER
+        // Handle connection updates
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
-            // Display QR Code kama ipo
             if (qr) {
                 console.log('📱 Scan QR Code below:');
-                // QR itaonekana kwenye terminal kwa sababu printQRInTerminal = true
             }
             
             if (connection === 'close') {
@@ -275,7 +297,6 @@ async function startNyoni() {
                 if (reason !== DisconnectReason.loggedOut) {
                     console.log("🔄 Attempting to reconnect in 5 seconds...");
                     setTimeout(() => {
-                        console.log('🔄 Starting reconnection...');
                         startNyoni().catch(e => console.error('Reconnection failed:', e));
                     }, 5000);
                 } else {
@@ -284,40 +305,38 @@ async function startNyoni() {
                 }
             } else if (connection === 'open') {
                 console.log('✅ NYONI-XMD IS LIVE! (Using SQLite Storage)');
-                
-                // Save credentials immediately after connection
                 await authStore.saveCreds();
+                await authStore.saveKeys();
+                
+                // Load plugins after connection
+                loadPlugins();
                 
                 // Notify owner
                 const ownerJid = jidNormalizedUser(sock.user.id);
                 await sock.sendMessage(ownerJid, { 
-                    text: "🚀 *NYONI-XMD CONNECTED!*\n\n" +
-                          "✅ Using SQLite for persistent storage\n" +
-                          "✅ Automatic menu system active\n" +
-                          "✅ Anti-sticker protection enabled\n" +
-                          `📊 Plugins loaded: ${plugins.size}`
+                    text: `🚀 *NYONI-XMD CONNECTED!*\n\n✅ Using SQLite for persistent storage\n✅ Automatic menu system active\n✅ Anti-sticker protection enabled\n📊 Commands loaded: ${global.commandsList.length}`
                 });
             }
         });
 
-        // 6. WEKA MESSAGE HANDLER
+        // Message handler
         sock.ev.on('messages.upsert', async (m) => {
             const msg = m.messages[0];
             if (!msg.message) return;
 
             const from = msg.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
-            
+            const senderJid = msg.key.participant || msg.key.remoteJid;
+
             // Anti-sticker check
             if (isGroup && msg.message.stickerMessage && global.botSettings.antiSticker) {
-                const senderJid = msg.key.participant || msg.key.remoteJid;
                 if (!checkStickerPermission(from, senderJid)) {
                     await handleStickerViolation(sock, msg, from, senderJid);
                     return;
                 }
             }
 
-            // Status auto-view/react
+            // Auto status view/react
             if (from === 'status@broadcast') {
                 if (global.botSettings.autoStatus) await sock.readMessages([msg.key]);
                 if (global.botSettings.autoStatusReact) {
@@ -328,7 +347,7 @@ async function startNyoni() {
                 return;
             }
 
-            const isOwner = msg.key.fromMe || from.split('@')[0] === sock.user.id.split(':')[0];
+            // Check if message is a command
             const body = (msg.message.conversation || 
                          msg.message.extendedTextMessage?.text || 
                          msg.message.imageMessage?.caption || 
@@ -338,15 +357,14 @@ async function startNyoni() {
             const args = body.trim().split(/ +/).slice(1);
 
             if (isCmd) {
-                if (!global.botSettings.publicMode && !isOwner) return;
+                if (!global.botSettings.publicMode && !msg.key.fromMe) return;
 
-                // Auto react
+                // Auto react and typing
                 await sock.sendMessage(from, { react: { text: "⚡", key: msg.key } });
                 if (global.botSettings.autoType) await sock.sendPresenceUpdate('composing', from);
 
                 // Menu command
-                if (commandName === 'menu' || (commandName === 'help' && !args[0])) {
-                    loadPlugins(); // Reload plugins for fresh menu
+                if (commandName === 'menu' || (commandName === 'help' && args.length === 0)) {
                     const menuText = generateAutoMenu();
                     return await sock.sendMessage(from, { 
                         image: { url: thumbUrl }, 
@@ -356,26 +374,28 @@ async function startNyoni() {
                 
                 // Help for specific command
                 if (commandName === 'help' && args[0]) {
-                    return await sock.sendMessage(from, { 
-                        text: generateHelp(args[0].toLowerCase()) 
-                    }, { quoted: msg });
+                    const helpText = generateHelp(args[0].toLowerCase());
+                    return await sock.sendMessage(from, { text: helpText }, { quoted: msg });
                 }
                 
-                // Plugin command handler
-                const plugin = plugins.get(commandName);
-                if (plugin) {
+                // Execute command from plugin
+                const cmd = getCommand(commandName);
+                if (cmd) {
                     try {
-                        await plugin.execute(sock, from, msg, args);
+                        await cmd.function(sock, msg, { 
+                            from, args, isGroup, sender: senderJid, 
+                            prefix, isOwner: msg.key.fromMe 
+                        });
                     } catch (err) {
-                        console.error(`Error in plugin ${commandName}:`, err);
+                        console.error(`Error in command ${commandName}:`, err);
                         await sock.sendMessage(from, { 
                             text: `❌ Error executing ${prefix}${commandName}\nError: ${err.message || 'Unknown error'}` 
-                        });
+                        }, { quoted: msg });
                     }
-                } else if (isCmd) {
+                } else {
                     await sock.sendMessage(from, { 
                         text: `❌ Command "${commandName}" not found!\nUse ${prefix}menu to see all available commands.`
-                    });
+                    }, { quoted: msg });
                 }
             }
         });
@@ -398,4 +418,3 @@ setInterval(() => {
 
 // Start the bot
 startNyoni();
-            
